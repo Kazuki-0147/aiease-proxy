@@ -22,7 +22,8 @@ npm start
 ```
 
 服务器将在 http://localhost:3000 启动。
-<img width="1875" height="1064" alt="屏幕截图 2025-12-14 221000" src="https://github.com/user-attachments/assets/94ea2b66-7bbd-41ec-984a-7adca4a22f25" />
+<img width="2551" height="1206" alt="屏幕截图 2025-12-14 215229" src="https://github.com/user-attachments/assets/ada7905c-d856-4f8b-b24c-e27b2d428ab4" />
+
 
 ## 📡 API 端点
 
