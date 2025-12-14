@@ -293,29 +293,55 @@ body {
     color: var(--accent-primary);
 }
 
-.aspect-preview.square {
+/* 所有 10 种宽高比预览 */
+.aspect-preview.ratio-1-1 {
     width: 14px;
     height: 14px;
 }
 
-.aspect-preview.wide {
-    width: 18px;
-    height: 10px;
+.aspect-preview.ratio-5-4 {
+    width: 15px;
+    height: 12px;
 }
 
-.aspect-preview.tall {
-    width: 10px;
-    height: 18px;
+.aspect-preview.ratio-4-5 {
+    width: 12px;
+    height: 15px;
 }
 
-.aspect-preview.landscape {
+.aspect-preview.ratio-4-3 {
     width: 16px;
     height: 12px;
 }
 
-.aspect-preview.portrait {
+.aspect-preview.ratio-3-4 {
     width: 12px;
     height: 16px;
+}
+
+.aspect-preview.ratio-3-2 {
+    width: 18px;
+    height: 12px;
+}
+
+.aspect-preview.ratio-2-3 {
+    width: 12px;
+    height: 18px;
+}
+
+.aspect-preview.ratio-16-9 {
+    width: 18px;
+    height: 10px;
+}
+
+.aspect-preview.ratio-9-16 {
+    width: 10px;
+    height: 18px;
+}
+
+.aspect-preview.ratio-21-9 {
+    width: 21px;
+    height: 9px;
 }
 
 /* 滑块 */
