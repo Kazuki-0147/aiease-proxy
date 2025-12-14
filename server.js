@@ -743,12 +743,14 @@ app.get('/health', (req, res) => {
 
 // ==================== 启动服务器 ====================
 
-app.listen(PORT, () => {
+const HOST = process.env.HOST || '0.0.0.0';
+
+app.listen(PORT, HOST, () => {
     console.log(`
 ╔═══════════════════════════════════════════════════════════╗
 ║           AI EASE Proxy - Image Generation UI             ║
 ╠═══════════════════════════════════════════════════════════╣
-║  Server running at: http://localhost:${PORT}                  ║
+║  Server running at: http://${HOST}:${PORT}                     ║
 ║                                                           ║
 ║  Web UI:                                                  ║
 ║    http://localhost:${PORT}                  - 图像生成界面    ║
