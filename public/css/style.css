@@ -759,6 +759,21 @@ body {
     color: rgba(255, 255, 255, 0.6);
 }
 
+/* 耗时标签 */
+.duration-badge {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    background: rgba(0, 0, 0, 0.7);
+    backdrop-filter: blur(4px);
+    color: white;
+    font-size: 11px;
+    font-weight: 500;
+    padding: 4px 8px;
+    border-radius: 12px;
+    z-index: 10;
+}
+
 /* 加载骨架 */
 .skeleton {
     background: linear-gradient(90deg, var(--bg-tertiary) 25%, var(--bg-hover) 50%, var(--bg-tertiary) 75%);

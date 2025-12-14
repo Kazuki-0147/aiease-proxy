@@ -311,6 +311,8 @@ async function handleGenerate() {
             await delay(index * 2000);
         }
 
+        const startTime = Date.now(); // 记录开始时间
+
         try {
             const result = await generateImage({
                 prompt: task.prompt,
@@ -320,23 +322,26 @@ async function handleGenerate() {
                 referenceImages: state.mode === 'i2i' ? state.referenceImages : []
             });
 
+            const duration = ((Date.now() - startTime) / 1000).toFixed(1); // 计算耗时(秒)
+
             // 更新进度
             completed++;
             updateProgressCount(completed, tasks.length);
-            updateProgressItem(task.id, 'completed');
+            updateProgressItem(task.id, 'completed', duration);
 
             // 添加结果
             if (result.success && result.images) {
                 result.images.forEach(img => {
-                    addResultImage(img.url, task.prompt);
+                    addResultImage(img.url, task.prompt, duration);
                 });
             }
 
             return result;
         } catch (error) {
+            const duration = ((Date.now() - startTime) / 1000).toFixed(1);
             completed++;
             updateProgressCount(completed, tasks.length);
-            updateProgressItem(task.id, 'error');
+            updateProgressItem(task.id, 'error', duration);
             console.error('生成失败:', error);
             return { success: false, error: error.message };
         }
@@ -387,18 +392,20 @@ function updateProgressCount(completed, total) {
     elements.progressCount.textContent = `${completed}/${total}`;
 }
 
-function updateProgressItem(taskId, status) {
+function updateProgressItem(taskId, status, duration = null) {
     const item = document.getElementById(`progress-${taskId}`);
     if (item) {
         item.classList.remove('progress-item');
         item.classList.add('progress-item', status);
+
+        const durationText = duration ? ` (${duration}s)` : '';
 
         if (status === 'completed') {
             item.innerHTML = `
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
                     <polyline points="20 6 9 17 4 12"/>
                 </svg>
-                <span>完成</span>
+                <span>完成${durationText}</span>
             `;
         } else if (status === 'error') {
             item.innerHTML = `
@@ -406,7 +413,7 @@ function updateProgressItem(taskId, status) {
                     <line x1="18" y1="6" x2="6" y2="18"/>
                     <line x1="6" y1="6" x2="18" y2="18"/>
                 </svg>
-                <span>失败</span>
+                <span>失败${durationText}</span>
             `;
         }
     }
@@ -414,24 +421,28 @@ function updateProgressItem(taskId, status) {
 
 // ==================== 结果展示 ====================
 
-function addResultImage(url, prompt) {
+function addResultImage(url, prompt, duration = null) {
     // 隐藏空状态
     elements.emptyState.classList.add('hidden');
 
     // 创建图片卡片
-    const card = createImageCard(url, prompt);
+    const card = createImageCard(url, prompt, { duration });
 
     // 添加到结果网格
     elements.resultsGrid.insertBefore(card, elements.resultsGrid.firstChild);
 
     // 保存到结果数组
-    state.results.unshift({ url, prompt });
+    state.results.unshift({ url, prompt, duration });
 }
 
 function createImageCard(url, prompt, meta = {}) {
     const card = document.createElement('div');
     card.className = 'image-card';
+
+    const durationBadge = meta.duration ? `<span class="duration-badge">${meta.duration}s</span>` : '';
+
     card.innerHTML = `
+        ${durationBadge}
         <img src="${url}" alt="${prompt}" loading="lazy">
         <div class="image-card-overlay">
             <div class="image-card-prompt">${escapeHtml(prompt)}</div>
