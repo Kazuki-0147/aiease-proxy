@@ -10,6 +10,7 @@ const express = require('express');
 const fetch = require('node-fetch');
 const path = require('path');
 const fs = require('fs');
+const crypto = require('crypto');
 
 const app = express();
 app.use(express.json({ limit: '50mb' }));
@@ -75,7 +76,8 @@ const MODEL_CONFIG = {
         model: 'see_dream_img',
         supportsI2i: true,
         aspectRatioFormat: 'colon',
-        supportsResolution: true
+        supportsResolution: true,
+        requiresAieaseOss: true  // 需要使用 AI EASE 官方上传
     },
     // Seedream 4.5
     'doubao-seedream-4.5': {
@@ -83,7 +85,8 @@ const MODEL_CONFIG = {
         model: 'doubao-seedream-4.5',
         supportsI2i: true,
         aspectRatioFormat: 'colon',
-        supportsResolution: true
+        supportsResolution: true,
+        requiresAieaseOss: true  // 需要使用 AI EASE 官方上传
     }
 };
 
@@ -244,8 +247,103 @@ async function getAnonymousToken() {
     throw new Error('获取匿名 Token 失败: ' + JSON.stringify(data));
 }
 
+// ==================== AI EASE 官方图床上传（抓包还原） ====================
+
+const AIEASE_OSS_FEATURE_CODE = 'default_persistent';
+const AIEASE_OSS_SECRET = 'Q@D24=oueV%]OBS8i,%eK=5I|7WU$PeE';
+const AIEASE_OSS_KEY = crypto.createHash('sha256').update(AIEASE_OSS_SECRET).digest(); // 32 bytes
+
+function aieaseOssEncrypt(plainText) {
+    const iv = crypto.randomBytes(16);
+    const encoded = encodeURIComponent(plainText);
+    const cipher = crypto.createCipheriv('aes-256-cfb', AIEASE_OSS_KEY, iv);
+    const encrypted = Buffer.concat([cipher.update(encoded, 'utf8'), cipher.final()]);
+    return Buffer.concat([iv, encrypted]).toString('base64');
+}
+
+function aieaseOssDecrypt(base64CipherText) {
+    const buf = Buffer.from(base64CipherText, 'base64');
+    if (buf.length <= 16) throw new Error('Invalid encrypted payload');
+    const iv = buf.subarray(0, 16);
+    const encrypted = buf.subarray(16);
+    const decipher = crypto.createDecipheriv('aes-256-cfb', AIEASE_OSS_KEY, iv);
+    const decoded = Buffer.concat([decipher.update(encrypted), decipher.final()]).toString('utf8');
+    return decodeURIComponent(decoded);
+}
+
 /**
- * 上传图片到临时图床
+ * 上传图片到 AI EASE 官方 CDN
+ */
+async function uploadImageToAieaseOss(token, base64Image, fakeIP) {
+    // 从 base64 提取数据
+    let base64Data = base64Image;
+    let mimeType = 'image/jpeg';
+
+    if (typeof base64Image !== 'string' || !base64Image.startsWith('data:')) {
+        throw new Error('AI EASE OSS 上传仅支持 data URL 输入');
+    }
+
+    const mimeMatch = base64Image.match(/data:([^;]+);/);
+    if (mimeMatch) mimeType = mimeMatch[1];
+    const base64Match = base64Image.match(/base64,(.+)/);
+    if (base64Match) base64Data = base64Match[1];
+
+    const imageBuffer = Buffer.from(base64Data, 'base64');
+    const ext = mimeType.split('/')[1] || 'jpg';
+    const filename = `upload_${Date.now()}.${ext}`;
+
+    console.log(`[AI EASE OSS] 准备上传图片... (${imageBuffer.length} bytes)`);
+
+    // 1) 获取预签名上传 URL（返回值是加密字符串，需要同算法解密）
+    const meta = {
+        length: imageBuffer.length,
+        filetype: mimeType,
+        filename,
+        time: Math.floor(Date.now() / 1000)
+    };
+    const encryptedData = aieaseOssEncrypt(JSON.stringify(meta));
+
+    const { headers } = getHeaders(token, fakeIP);
+    const presignedResp = await fetch(`${AIEASE_API_BASE}/oss/getMediaPreSignedUrl`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+            featureCode: AIEASE_OSS_FEATURE_CODE,
+            encryptedData
+        })
+    });
+
+    const presignedJson = await presignedResp.json();
+    if (presignedJson.code !== 200 || !presignedJson.result) {
+        throw new Error(`AI EASE 获取预签名失败: ${JSON.stringify(presignedJson)}`);
+    }
+
+    const preUrl = aieaseOssDecrypt(presignedJson.result);
+    if (!preUrl || !preUrl.startsWith('http')) {
+        throw new Error('AI EASE 预签名 URL 无效');
+    }
+
+    console.log(`[AI EASE OSS] 获取预签名 URL 成功，开始上传...`);
+
+    // 2) PUT 上传文件到预签名地址
+    const putResp = await fetch(preUrl, {
+        method: 'PUT',
+        headers: { 'Content-Type': mimeType },
+        body: imageBuffer
+    });
+
+    if (!putResp.ok) {
+        throw new Error(`AI EASE OSS PUT 上传失败: HTTP ${putResp.status}`);
+    }
+
+    // 3) 生成最终可用 URL（去掉签名参数）
+    const realUrl = preUrl.split('?')[0];
+    console.log(`[AI EASE OSS] 上传成功: ${realUrl}`);
+    return realUrl;
+}
+
+/**
+ * 上传图片到临时图床 (catbox)
  */
 async function uploadImageToCDN(token, base64Image) {
     // 从 base64 提取数据
@@ -335,8 +433,22 @@ async function submitImageGeneration(token, prompt, options = {}) {
         const refImage = effectiveRefImages[i];
         console.log(`[Generate] 处理图片 ${i + 1}/${effectiveRefImages.length}...`);
 
-        // 尝试上传图片获取 URL
-        const imageUrl = await uploadImageToCDN(token, refImage);
+        let imageUrl = null;
+
+        // 根据模型配置选择上传方式
+        if (modelConfig.requiresAieaseOss) {
+            // Seedream 4.0/4.5 等需要使用 AI EASE 官方 CDN
+            try {
+                imageUrl = await uploadImageToAieaseOss(token, refImage, fakeIP);
+            } catch (ossError) {
+                console.log(`[Generate] AI EASE OSS 上传失败: ${ossError.message}`);
+                // 如果 AI EASE OSS 失败，尝试 catbox 作为备用
+                imageUrl = await uploadImageToCDN(token, refImage);
+            }
+        } else {
+            // 其他模型使用 catbox
+            imageUrl = await uploadImageToCDN(token, refImage);
+        }
 
         if (imageUrl) {
             // 使用 imgUrl 字段（不是 image）
