@@ -44,7 +44,8 @@ npm start
 ### Web UI
 
 直接访问 http://localhost:3000 使用图形界面：
-<img width="2551" height="1206" alt="屏幕截图 2025-12-14 215229" src="https://github.com/user-attachments/assets/ada7905c-d856-4f8b-b24c-e27b2d428ab4" />
+<img width="2556" height="1207" alt="image" src="https://github.com/user-attachments/assets/f99cb996-4795-4d80-ba69-97def6b2aab9" />
+
 - 选择 **文生图** / **图生图** / **文生视频** / **图生视频** 模式
 - 输入提示词，调整参数
 - 图生图/图生视频支持最多 5 张参考图片
