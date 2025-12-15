@@ -55,21 +55,50 @@
                     </svg>
                     图生图
                 </button>
+                <button class="mode-btn" data-mode="t2v">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polygon points="5 3 19 12 5 21 5 3" />
+                    </svg>
+                    文生视频
+                </button>
+                <button class="mode-btn" data-mode="i2v">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18" />
+                        <line x1="7" y1="2" x2="7" y2="22" />
+                        <line x1="17" y1="2" x2="17" y2="22" />
+                        <line x1="2" y1="12" x2="22" y2="12" />
+                        <polygon points="10 8 14 12 10 16 10 8" />
+                    </svg>
+                    图生视频
+                </button>
             </div>
 
             <!-- 参数面板 -->
             <div class="params-panel">
                 <h3 class="panel-title">生成参数</h3>
 
-                <div class="param-group">
+                <!-- 图像模型 (默认显示) -->
+                <div class="param-group" id="image-model-group">
                     <label class="param-label">模型</label>
                     <select id="model-select" class="param-select">
                         <option value="kie_nano_banana_pro">Nano Banana Pro (高质量)</option>
                         <option value="kie_nano_banana">Nano Banana (标准)</option>
+                        <option value="wf_art">AI Ease Model (仅文生图)</option>
+                        <option value="see_dream_img">Seedream 4.0</option>
+                        <option value="doubao-seedream-4.5">Seedream 4.5 (最新)</option>
                     </select>
                 </div>
 
-                <div class="param-group">
+                <!-- 视频模型 (默认隐藏) -->
+                <div class="param-group hidden" id="video-model-group">
+                    <label class="param-label">视频模型</label>
+                    <select id="video-model-select" class="param-select">
+                        <option value="k-seedance" selected>Seedance (字节跳动视频生成)</option>
+                    </select>
+                </div>
+
+                <!-- 图像分辨率 (视频模式下隐藏) -->
+                <div class="param-group" id="image-resolution-group">
                     <label class="param-label">分辨率</label>
                     <div class="param-buttons">
                         <button class="param-btn" data-resolution="1K">1K</button>
@@ -78,7 +107,8 @@
                     </div>
                 </div>
 
-                <div class="param-group">
+                <!-- 图像宽高比 (视频模式下隐藏) -->
+                <div class="param-group" id="image-aspect-group">
                     <label class="param-label">宽高比</label>
                     <div class="aspect-ratio-grid">
                         <button class="aspect-btn active" data-ratio="1:1" title="1:1">
@@ -130,6 +160,45 @@
                         <span class="param-value" id="concurrent-value">1</span>
                     </label>
                     <input type="range" id="concurrent-slider" class="param-slider" min="1" max="10" value="1">
+                </div>
+
+                <!-- 视频专用参数 (默认隐藏) -->
+                <div id="video-params" class="hidden">
+                    <div class="param-group">
+                        <label class="param-label">视频时长</label>
+                        <div class="param-buttons">
+                            <button class="param-btn active" data-duration="5">5秒</button>
+                            <button class="param-btn" data-duration="10">10秒</button>
+                        </div>
+                    </div>
+
+                    <div class="param-group">
+                        <label class="param-label">视频画质</label>
+                        <div class="param-buttons">
+                            <button class="param-btn" data-video-resolution="480p">480P</button>
+                            <button class="param-btn active" data-video-resolution="720p">720P</button>
+                            <button class="param-btn" data-video-resolution="1080p">1080P</button>
+                        </div>
+                    </div>
+
+                    <div class="param-group">
+                        <label class="param-label">生成模式</label>
+                        <div class="param-buttons">
+                            <button class="param-btn" data-video-mode="lite">Lite (快速)</button>
+                            <button class="param-btn active" data-video-mode="pro">Pro (高质量)</button>
+                        </div>
+                    </div>
+
+                    <div class="param-group" id="video-ratio-group">
+                        <label class="param-label">视频比例 (仅文生视频)</label>
+                        <div class="param-buttons">
+                            <button class="param-btn" data-video-ratio="1:1">1:1</button>
+                            <button class="param-btn" data-video-ratio="4:3">4:3</button>
+                            <button class="param-btn" data-video-ratio="3:4">3:4</button>
+                            <button class="param-btn active" data-video-ratio="16:9">16:9</button>
+                            <button class="param-btn" data-video-ratio="9:16">9:16</button>
+                        </div>
+                    </div>
                 </div>
             </div>
 

@@ -19,3 +19,11 @@ Thumbs.db
 # Environment
 .env
 .env.local
+
+# 抓包文件
+*抓包/
+Seedance/
+Seedance i2v/
+
+# 油猴脚本
+油猴脚本.txt

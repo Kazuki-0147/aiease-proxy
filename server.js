@@ -44,6 +44,54 @@ const MAX_HISTORY = 100;
 const generationJobs = new Map(); // jobId -> { status, createdAt, updatedAt, result, error, ... }
 const JOB_TTL_MS = 6 * 60 * 60 * 1000; // 6h
 
+// 模型配置
+const MODEL_CONFIG = {
+    // Nano Banana 系列
+    'kie_nano_banana_pro': {
+        genType: 'kie_nano_banana_pro',
+        model: 'kie_nano_banana_pro',
+        supportsI2i: true,
+        aspectRatioFormat: 'colon', // 1:1
+        supportsResolution: true
+    },
+    'kie_nano_banana': {
+        genType: 'kie_nano_banana',
+        model: 'kie_nano_banana',
+        supportsI2i: true,
+        aspectRatioFormat: 'colon',
+        supportsResolution: true
+    },
+    // Al Ease Model (不支持图生图)
+    'wf_art': {
+        genType: 'wf_art',
+        model: 'wf_art',
+        supportsI2i: false,
+        aspectRatioFormat: 'dash', // 1-1
+        supportsResolution: false
+    },
+    // Seedream 4.0
+    'see_dream_img': {
+        genType: 'see_dream_img',
+        model: 'see_dream_img',
+        supportsI2i: true,
+        aspectRatioFormat: 'colon',
+        supportsResolution: true
+    },
+    // Seedream 4.5
+    'doubao-seedream-4.5': {
+        genType: 'volces_img',
+        model: 'doubao-seedream-4.5',
+        supportsI2i: true,
+        aspectRatioFormat: 'colon',
+        supportsResolution: true
+    }
+};
+
+// 获取模型配置
+function getModelConfig(modelId) {
+    return MODEL_CONFIG[modelId] || MODEL_CONFIG['kie_nano_banana_pro'];
+}
+
 // 上游并发控制：避免大量并发导致风控/排队/断连
 const MAX_CONCURRENT_UPSTREAM = parseInt(process.env.MAX_CONCURRENT_UPSTREAM || '10', 10);
 let upstreamRunning = 0;
@@ -255,13 +303,22 @@ async function uploadImageToCDN(token, base64Image) {
 async function submitImageGeneration(token, prompt, options = {}) {
     const { headers, fakeIP } = getHeaders(token, options.fakeIP);
 
-    const model = options.model || 'kie_nano_banana_pro';
+    const modelId = options.model || 'kie_nano_banana_pro';
+    const modelConfig = getModelConfig(modelId);
     const aspectRatio = options.aspectRatio || '1:1';
     const resolution = options.resolution || '2K';
 
     // 支持多图: referenceImages 数组 或 referenceImage 单图
     const referenceImages = options.referenceImages || (options.referenceImage ? [options.referenceImage] : []);
-    const genType = referenceImages.length > 0 ? 'i2i' : 't2i';
+
+    // 检查模型是否支持图生图
+    if (referenceImages.length > 0 && !modelConfig.supportsI2i) {
+        console.log(`[Generate] ⚠️ 模型 ${modelId} 不支持图生图，忽略参考图片`);
+    }
+
+    // 如果模型不支持 i2i，强制使用 t2i
+    const effectiveRefImages = modelConfig.supportsI2i ? referenceImages : [];
+    const genType = effectiveRefImages.length > 0 ? 'i2i' : 't2i';
 
     // 确保 prompt 是字符串
     const promptText = typeof prompt === 'string' ? prompt : String(prompt);
@@ -273,10 +330,10 @@ async function submitImageGeneration(token, prompt, options = {}) {
     // 先添加文本提示
     content.push({ type: 'text', text: promptText });
 
-    // 处理所有参考图片
-    for (let i = 0; i < referenceImages.length; i++) {
-        const refImage = referenceImages[i];
-        console.log(`[Generate] 处理图片 ${i + 1}/${referenceImages.length}...`);
+    // 处理所有参考图片（仅当模型支持 i2i 时）
+    for (let i = 0; i < effectiveRefImages.length; i++) {
+        const refImage = effectiveRefImages[i];
+        console.log(`[Generate] 处理图片 ${i + 1}/${effectiveRefImages.length}...`);
 
         // 尝试上传图片获取 URL
         const imageUrl = await uploadImageToCDN(token, refImage);
@@ -292,20 +349,34 @@ async function submitImageGeneration(token, prompt, options = {}) {
         }
     }
 
+    // 处理宽高比格式: 有的模型用 1:1，有的用 1-1
+    let formattedAspectRatio = aspectRatio;
+    if (modelConfig.aspectRatioFormat === 'dash') {
+        formattedAspectRatio = aspectRatio.replace(/:/g, '-');
+    }
+
+    // 构建请求体
+    const command = {
+        type: genType,
+        aspectRatio: formattedAspectRatio
+    };
+
+    // 部分模型支持 resolution，部分不支持
+    if (modelConfig.supportsResolution) {
+        command.resolution = resolution;
+    }
+
     const body = {
-        genType: model,
-        model: model,
+        genType: modelConfig.genType,
+        model: modelConfig.model,
         params: {
             content: content,
-            command: {
-                type: genType,
-                aspectRatio,
-                resolution
-            }
+            command: command
         }
     };
 
     console.log(`[Generate] 使用伪造 IP: ${fakeIP}`);
+    console.log(`[Generate] 模型: ${modelId} (genType: ${modelConfig.genType}, model: ${modelConfig.model})`);
     console.log(`[Generate] 提交任务: "${promptText.substring(0, 50)}..." (${genType})`);
     console.log(`[Generate] 请求体: ${JSON.stringify({ ...body, params: { ...body.params, content: body.params.content.map(c => c.type === 'image' ? { ...c, imgUrl: (c.imgUrl || '').substring(0, 80) + '...' } : c) } })}`);
 
@@ -397,6 +468,159 @@ async function generateImage(prompt, options = {}) {
     const images = await pollForResult(token, taskId, fakeIP);
 
     return images;
+}
+
+// ==================== 视频生成 ====================
+
+const VIDEO_POLL_INTERVAL = 5000; // 视频轮询间隔 5 秒
+const VIDEO_MAX_POLL_TIME = 600000; // 视频最大等待时间 10 分钟
+
+/**
+ * 提交视频生成任务
+ */
+async function submitVideoGeneration(token, prompt, options = {}) {
+    const { headers, fakeIP } = getHeaders(token, options.fakeIP);
+
+    const type = options.referenceImage ? 'i2v' : 't2v';
+    const ratio = options.ratio || '16:9';
+    const resolution = options.resolution || '720p';
+    const duration = options.duration || 5;
+    const mode = options.mode || 'pro';
+
+    // 构建 content 数组
+    const content = [{ type: 'text', text: prompt }];
+
+    // 如果有参考图片，添加图片
+    if (options.referenceImage) {
+        // 尝试上传图片获取 URL
+        const imageUrl = await uploadImageToCDN(token, options.referenceImage);
+        if (imageUrl) {
+            content.push({ type: 'image', imgUrl: imageUrl });
+            console.log(`[Video] 参考图片 CDN URL: ${imageUrl}`);
+        } else {
+            console.log(`[Video] CDN 上传失败，尝试 base64`);
+            content.push({ type: 'image', imgUrl: options.referenceImage });
+        }
+    }
+
+    // 构建 command
+    const command = {
+        type: type,
+        resolution: resolution,
+        duration: duration,
+        mode: mode
+    };
+
+    // 文生视频支持比例，图生视频不支持
+    if (type === 't2v') {
+        command.ratio = ratio;
+    }
+
+    const body = {
+        featureCode: 'k_seedance',
+        model: 'k-seedance',
+        params: {
+            content: content,
+            command: command,
+            isFrames: false,
+            mode: mode
+        }
+    };
+
+    console.log(`[Video] 使用伪造 IP: ${fakeIP}`);
+    console.log(`[Video] 提交任务: "${prompt.substring(0, 50)}..." (${type})`);
+    console.log(`[Video] 参数: ratio=${ratio}, resolution=${resolution}, duration=${duration}s, mode=${mode}`);
+
+    const response = await fetch(`${AIEASE_API_BASE}/gen/videos/model-video/generate`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(body)
+    });
+
+    const data = await response.json();
+
+    if (data.code === 200 && data.result && data.result.taskId) {
+        console.log(`[Video] 任务ID: ${data.result.taskId}, 状态: ${data.result.taskStatus}`);
+        return data.result.taskId;
+    }
+
+    throw new Error('提交视频生成任务失败: ' + JSON.stringify(data));
+}
+
+/**
+ * 轮询获取视频生成结果
+ */
+async function pollForVideoResult(token, taskId, fakeIPOverride = null) {
+    const { headers, fakeIP } = getHeaders(token, fakeIPOverride);
+    const startTime = Date.now();
+    let lastResponse = null;
+    let pollCount = 0;
+
+    console.log(`[Video Poll] 使用伪造 IP: ${fakeIP}`);
+    console.log(`[Video Poll] 开始轮询任务 ${taskId}...`);
+
+    while (Date.now() - startTime < VIDEO_MAX_POLL_TIME) {
+        pollCount++;
+
+        const response = await fetch(`${AIEASE_API_BASE}/gen/videos/model-video/${taskId}?t=${Date.now()}`, {
+            method: 'GET',
+            headers
+        });
+
+        const data = await response.json();
+        lastResponse = data;
+
+        // 每 10 次轮询输出一次完整响应
+        if (pollCount % 10 === 1) {
+            console.log(`\n[Video Poll #${pollCount}] 上游响应: ${JSON.stringify(data)}`);
+        }
+
+        if (data.code !== 200) {
+            console.log(`\n[Video Poll] 上游返回错误: ${JSON.stringify(data)}`);
+            throw new Error(`视频生成错误: ${data.message || JSON.stringify(data)}`);
+        }
+
+        if (data.result) {
+            const status = data.result.taskStatus;
+
+            if (status === 'succeed' && data.result.videoUrl) {
+                console.log(`\n[Video Poll] 生成完成!`);
+                console.log(`[Video Poll] 视频 URL: ${data.result.videoUrl}`);
+                return {
+                    videoUrl: data.result.videoUrl,
+                    thumbnailUrl: data.result.thumbnailUrl
+                };
+            }
+
+            if (status === 'failed' || status === 'error') {
+                console.log(`\n[Video Poll] 任务失败: ${JSON.stringify(data.result)}`);
+                throw new Error(`视频生成失败: ${data.result.message || status}`);
+            }
+        }
+
+        // 等待后继续轮询
+        await new Promise(resolve => setTimeout(resolve, VIDEO_POLL_INTERVAL));
+        process.stdout.write('.');
+    }
+
+    console.log(`\n[Video Poll] 超时! 最后响应: ${JSON.stringify(lastResponse)}`);
+    throw new Error(`视频生成超时 (轮询${pollCount}次)`);
+}
+
+/**
+ * 完整的视频生成流程
+ */
+async function generateVideo(prompt, options = {}) {
+    // 1. 获取匿名 Token
+    const { token, fakeIP } = await getAnonymousToken();
+
+    // 2. 提交视频生成任务
+    const taskId = await submitVideoGeneration(token, prompt, { ...options, fakeIP });
+
+    // 3. 轮询获取结果
+    const result = await pollForVideoResult(token, taskId, fakeIP);
+
+    return result;
 }
 
 /**
@@ -600,6 +824,152 @@ app.get('/api/generate/status/:jobId', (req, res) => {
             error: job.error || null
         }
     });
+});
+
+// ==================== 视频生成 API ====================
+
+/**
+ * 前端视频生成接口（同步，等待结果）
+ * POST /api/generate/video
+ */
+app.post('/api/generate/video', async (req, res) => {
+    try {
+        const {
+            prompt,
+            ratio = '16:9',
+            resolution = '720p',
+            duration = 5,
+            mode = 'pro',
+            referenceImage = null
+        } = req.body;
+
+        if (!prompt) {
+            return res.status(400).json({
+                success: false,
+                error: 'prompt is required'
+            });
+        }
+
+        const type = referenceImage ? 'i2v' : 't2v';
+        console.log(`\n========== 前端视频生成请求 ==========`);
+        console.log(`类型: ${type}`);
+        console.log(`Prompt: ${prompt}`);
+        console.log(`Ratio: ${ratio}, Resolution: ${resolution}, Duration: ${duration}s, Mode: ${mode}`);
+
+        const result = await generateVideo(prompt, {
+            ratio,
+            resolution,
+            duration,
+            mode,
+            referenceImage
+        });
+
+        // 添加到历史记录
+        addToHistory({
+            prompt,
+            type,
+            ratio,
+            resolution,
+            duration,
+            mode,
+            videoUrl: result.videoUrl,
+            thumbnailUrl: result.thumbnailUrl
+        });
+
+        res.json({
+            success: true,
+            video: result
+        });
+
+    } catch (error) {
+        console.error(`[Video Error] ${error.message}`);
+        res.status(500).json({
+            success: false,
+            error: error.message
+        });
+    }
+});
+
+/**
+ * 前端视频生成接口（异步，提交后轮询）
+ * POST /api/generate/video/submit
+ */
+app.post('/api/generate/video/submit', async (req, res) => {
+    const {
+        prompt,
+        ratio = '16:9',
+        resolution = '720p',
+        duration = 5,
+        mode = 'pro',
+        referenceImage = null
+    } = req.body || {};
+
+    if (!prompt) {
+        return res.status(400).json({ success: false, error: 'prompt is required' });
+    }
+
+    const type = referenceImage ? 'i2v' : 't2v';
+
+    const jobId = generateId();
+    generationJobs.set(jobId, {
+        id: jobId,
+        status: 'queued',
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        jobType: 'video',
+        request: {
+            prompt,
+            type,
+            ratio,
+            resolution,
+            duration,
+            mode,
+            hasReferenceImage: !!referenceImage
+        }
+    });
+
+    // 后台执行
+    (async () => {
+        const job = generationJobs.get(jobId);
+        if (!job) return;
+
+        try {
+            const result = await enqueueUpstream(async () => {
+                job.status = 'running';
+                job.updatedAt = Date.now();
+
+                return await generateVideo(prompt, {
+                    ratio,
+                    resolution,
+                    duration,
+                    mode,
+                    referenceImage
+                });
+            });
+
+            // 添加到历史记录
+            addToHistory({
+                prompt,
+                type,
+                ratio,
+                resolution,
+                duration,
+                mode,
+                videoUrl: result.videoUrl,
+                thumbnailUrl: result.thumbnailUrl
+            });
+
+            job.status = 'completed';
+            job.updatedAt = Date.now();
+            job.result = result;
+        } catch (err) {
+            job.status = 'error';
+            job.updatedAt = Date.now();
+            job.error = String(err && err.message ? err.message : err);
+        }
+    })();
+
+    return res.json({ success: true, jobId });
 });
 
 /**
@@ -894,12 +1264,21 @@ function mapModel(model) {
         // 原始名称
         'kie_nano_banana_pro': 'kie_nano_banana_pro',
         'kie_nano_banana': 'kie_nano_banana',
+        'wf_art': 'wf_art',
+        'see_dream_img': 'see_dream_img',
+        'doubao-seedream-4.5': 'doubao-seedream-4.5',
         // 兼容 OpenAI 名称
         'dall-e-3': 'kie_nano_banana_pro',
         'dall-e-2': 'kie_nano_banana',
-        // 简写
+        // 简写/别名
         'nano-banana-pro': 'kie_nano_banana_pro',
-        'nano-banana': 'kie_nano_banana'
+        'nano-banana': 'kie_nano_banana',
+        'ai-ease': 'wf_art',
+        'aiease': 'wf_art',
+        'seedream-4.0': 'see_dream_img',
+        'seedream-4': 'see_dream_img',
+        'seedream-4.5': 'doubao-seedream-4.5',
+        'seedream': 'doubao-seedream-4.5' // 默认使用最新的 4.5
     };
     return modelMap[model] || 'kie_nano_banana_pro';
 }
@@ -917,16 +1296,45 @@ app.get('/v1/models', (req, res) => {
                 object: 'model',
                 created: 1698785189,
                 owned_by: 'aiease-proxy',
-                description: 'Nano Banana Pro - 高质量图像生成 (4K支持)',
-                aliases: ['dall-e-3', 'nano-banana-pro']
+                description: 'Nano Banana Pro - 高质量图像生成 (4K支持, 支持图生图)',
+                aliases: ['dall-e-3', 'nano-banana-pro'],
+                capabilities: { text_to_image: true, image_to_image: true }
             },
             {
                 id: 'kie_nano_banana',
                 object: 'model',
                 created: 1698785189,
                 owned_by: 'aiease-proxy',
-                description: 'Nano Banana - 标准图像生成',
-                aliases: ['dall-e-2', 'nano-banana']
+                description: 'Nano Banana - 标准图像生成 (支持图生图)',
+                aliases: ['dall-e-2', 'nano-banana'],
+                capabilities: { text_to_image: true, image_to_image: true }
+            },
+            {
+                id: 'wf_art',
+                object: 'model',
+                created: 1698785189,
+                owned_by: 'aiease-proxy',
+                description: 'AI Ease Model - 仅支持文生图',
+                aliases: ['ai-ease', 'aiease'],
+                capabilities: { text_to_image: true, image_to_image: false }
+            },
+            {
+                id: 'see_dream_img',
+                object: 'model',
+                created: 1698785189,
+                owned_by: 'aiease-proxy',
+                description: 'Seedream 4.0 - 字节跳动图像生成模型 (支持图生图)',
+                aliases: ['seedream-4.0', 'seedream-4'],
+                capabilities: { text_to_image: true, image_to_image: true }
+            },
+            {
+                id: 'doubao-seedream-4.5',
+                object: 'model',
+                created: 1698785189,
+                owned_by: 'aiease-proxy',
+                description: 'Seedream 4.5 - 最新字节跳动图像生成模型 (支持图生图)',
+                aliases: ['seedream-4.5', 'seedream'],
+                capabilities: { text_to_image: true, image_to_image: true }
             }
         ]
     });

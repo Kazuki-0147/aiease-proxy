@@ -5,7 +5,7 @@
 // ==================== 状态管理 ====================
 
 const state = {
-    mode: 't2i', // 't2i' 或 'i2i'
+    mode: 't2i', // 't2i', 'i2i', 't2v', 'i2v'
     model: 'kie_nano_banana_pro',
     resolution: '2K',
     aspectRatio: '1:1',
@@ -14,7 +14,12 @@ const state = {
     maxImages: 5,
     activeTasks: new Map(),
     results: [],
-    history: []
+    history: [],
+    // 视频参数
+    videoDuration: 5,
+    videoResolution: '720p',
+    videoMode: 'pro',
+    videoRatio: '16:9'
 };
 
 // ==================== DOM 元素 ====================
@@ -71,7 +76,15 @@ const elements = {
     modalClose: document.getElementById('modal-close'),
 
     // Toast
-    toastContainer: document.getElementById('toast-container')
+    toastContainer: document.getElementById('toast-container'),
+
+    // 视频参数
+    videoParams: document.getElementById('video-params'),
+    videoRatioGroup: document.getElementById('video-ratio-group'),
+    durationBtns: document.querySelectorAll('.param-btn[data-duration]'),
+    videoResolutionBtns: document.querySelectorAll('.param-btn[data-video-resolution]'),
+    videoModeBtns: document.querySelectorAll('.param-btn[data-video-mode]'),
+    videoRatioBtns: document.querySelectorAll('.param-btn[data-video-ratio]')
 };
 
 // ==================== 初始化 ====================
@@ -122,6 +135,39 @@ function bindEvents() {
     elements.concurrentSlider.addEventListener('input', (e) => {
         state.concurrent = parseInt(e.target.value);
         elements.concurrentValue.textContent = state.concurrent;
+    });
+
+    // 视频参数事件绑定
+    elements.durationBtns.forEach(btn => {
+        btn.addEventListener('click', () => {
+            elements.durationBtns.forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            state.videoDuration = parseInt(btn.dataset.duration);
+        });
+    });
+
+    elements.videoResolutionBtns.forEach(btn => {
+        btn.addEventListener('click', () => {
+            elements.videoResolutionBtns.forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            state.videoResolution = btn.dataset.videoResolution;
+        });
+    });
+
+    elements.videoModeBtns.forEach(btn => {
+        btn.addEventListener('click', () => {
+            elements.videoModeBtns.forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            state.videoMode = btn.dataset.videoMode;
+        });
+    });
+
+    elements.videoRatioBtns.forEach(btn => {
+        btn.addEventListener('click', () => {
+            elements.videoRatioBtns.forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            state.videoRatio = btn.dataset.videoRatio;
+        });
     });
 
     // 图片上传
@@ -228,14 +274,57 @@ function switchMode(mode) {
         btn.classList.toggle('active', btn.dataset.mode === mode);
     });
 
-    // 显示/隐藏上传区域
-    elements.uploadArea.classList.toggle('hidden', mode !== 'i2i');
+    const isVideoMode = mode === 't2v' || mode === 'i2v';
+    const needsUpload = mode === 'i2i' || mode === 'i2v';
+
+    // 显示/隐藏上传区域 (i2i 和 i2v 需要)
+    elements.uploadArea.classList.toggle('hidden', !needsUpload);
+
+    // 显示/隐藏视频参数 (t2v 和 i2v 需要)
+    if (elements.videoParams) {
+        elements.videoParams.classList.toggle('hidden', !isVideoMode);
+    }
+
+    // 显示/隐藏视频比例 (仅 t2v)
+    if (elements.videoRatioGroup) {
+        elements.videoRatioGroup.classList.toggle('hidden', mode !== 't2v');
+    }
+
+    // 切换模型列表：图像模式显示图像模型，视频模式显示视频模型
+    const imageModelGroup = document.getElementById('image-model-group');
+    const videoModelGroup = document.getElementById('video-model-group');
+    if (imageModelGroup) {
+        imageModelGroup.classList.toggle('hidden', isVideoMode);
+    }
+    if (videoModelGroup) {
+        videoModelGroup.classList.toggle('hidden', !isVideoMode);
+    }
+
+    // 隐藏图像专用参数 (分辨率、宽高比)
+    const imageResolutionGroup = document.getElementById('image-resolution-group');
+    const imageAspectGroup = document.getElementById('image-aspect-group');
+    if (imageResolutionGroup) {
+        imageResolutionGroup.classList.toggle('hidden', isVideoMode);
+    }
+    if (imageAspectGroup) {
+        imageAspectGroup.classList.toggle('hidden', isVideoMode);
+    }
 
     // 更新提示词占位符
     if (mode === 'i2i') {
         elements.promptInput.placeholder = '描述你想要的修改效果...';
+    } else if (mode === 't2v') {
+        elements.promptInput.placeholder = '描述你想要生成的视频内容...';
+    } else if (mode === 'i2v') {
+        elements.promptInput.placeholder = '描述你希望图片如何动起来...';
     } else {
         elements.promptInput.placeholder = '描述你想要生成的图像...';
+    }
+
+    // 更新生成按钮文字
+    const btnText = elements.generateBtn.querySelector('.btn-text');
+    if (btnText) {
+        btnText.textContent = isVideoMode ? '生成视频' : '生成';
     }
 }
 
@@ -308,10 +397,12 @@ function renderUploadGrid() {
     elements.uploadAddBtn.classList.toggle('hidden', state.referenceImages.length >= state.maxImages);
 }
 
-// ==================== 生成图片 ====================
+// ==================== 生成图片/视频 ====================
 
 async function handleGenerate() {
     const prompt = elements.promptInput.value.trim();
+    const isVideoMode = state.mode === 't2v' || state.mode === 'i2v';
+    const needsUpload = state.mode === 'i2i' || state.mode === 'i2v';
 
     if (!prompt) {
         showToast('请输入提示词', 'error');
@@ -319,7 +410,7 @@ async function handleGenerate() {
         return;
     }
 
-    if (state.mode === 'i2i' && state.referenceImages.length === 0) {
+    if (needsUpload && state.referenceImages.length === 0) {
         showToast('请上传至少一张参考图片', 'error');
         return;
     }
@@ -334,9 +425,12 @@ async function handleGenerate() {
     // 清空之前的进度
     elements.progressList.innerHTML = '';
 
+    // 并发数量
+    const taskCount = state.concurrent;
+
     // 创建任务
     const tasks = [];
-    for (let i = 0; i < state.concurrent; i++) {
+    for (let i = 0; i < taskCount; i++) {
         const taskId = generateId();
         tasks.push({
             id: taskId,
@@ -350,7 +444,7 @@ async function handleGenerate() {
         progressItem.id = `progress-${taskId}`;
         progressItem.innerHTML = `
             <div class="progress-spinner"></div>
-            <span>任务 ${i + 1}</span>
+            <span>${isVideoMode ? '视频生成中 (可能需要几分钟)' : `任务 ${i + 1}`}</span>
         `;
         elements.progressList.appendChild(progressItem);
     }
@@ -358,41 +452,58 @@ async function handleGenerate() {
     // 更新进度计数
     updateProgressCount(0, tasks.length);
 
-    // 限流执行任务 - 每 2 秒启动一个新任务，避免 API 过载
+    // 限流执行任务
     let completed = 0;
     const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
     const executeTask = async (task, index) => {
-        // 错开请求时间，每个任务延迟 index * 2秒
         if (index > 0) {
             await delay(index * 2000);
         }
 
-        const startTime = Date.now(); // 记录开始时间
+        const startTime = Date.now();
 
         try {
-            const result = await generateImage({
-                prompt: task.prompt,
-                model: state.model,
-                resolution: state.resolution,
-                aspectRatio: state.aspectRatio,
-                referenceImages: state.mode === 'i2i' ? state.referenceImages : []
-            });
+            let result;
+            if (isVideoMode) {
+                // 视频生成
+                result = await generateVideoRequest({
+                    prompt: task.prompt,
+                    ratio: state.videoRatio,
+                    resolution: state.videoResolution,
+                    duration: state.videoDuration,
+                    mode: state.videoMode,
+                    referenceImage: state.mode === 'i2v' ? state.referenceImages[0] : null
+                });
+            } else {
+                // 图片生成
+                result = await generateImage({
+                    prompt: task.prompt,
+                    model: state.model,
+                    resolution: state.resolution,
+                    aspectRatio: state.aspectRatio,
+                    referenceImages: state.mode === 'i2i' ? state.referenceImages : []
+                });
+            }
 
-            const duration = ((Date.now() - startTime) / 1000).toFixed(1); // 计算耗时(秒)
+            const duration = ((Date.now() - startTime) / 1000).toFixed(1);
 
-            const isSuccess = Boolean(result && result.success && Array.isArray(result.images) && result.images.length > 0);
+            const isSuccess = isVideoMode
+                ? Boolean(result && result.success && result.video && result.video.videoUrl)
+                : Boolean(result && result.success && Array.isArray(result.images) && result.images.length > 0);
 
-            // 更新进度
             completed++;
             updateProgressCount(completed, tasks.length);
             updateProgressItem(task.id, isSuccess ? 'completed' : 'error', duration);
 
-            // 添加结果
             if (isSuccess) {
-                result.images.forEach(img => {
-                    addResultImage(img.url, task.prompt, duration);
-                });
+                if (isVideoMode) {
+                    addResultVideo(result.video.videoUrl, result.video.thumbnailUrl, task.prompt, duration);
+                } else {
+                    result.images.forEach(img => {
+                        addResultImage(img.url, task.prompt, duration);
+                    });
+                }
             }
 
             return result;
@@ -406,27 +517,21 @@ async function handleGenerate() {
         }
     };
 
-    // 启动所有任务（它们会自动错开）
     const promises = tasks.map((task, index) => executeTask(task, index));
-
-    // 等待所有任务完成
     const results = await Promise.all(promises);
 
-    // 检查结果
     const successCount = results.filter(r => r.success).length;
     const failCount = results.filter(r => !r.success).length;
 
     if (successCount > 0) {
-        showToast(`成功生成 ${successCount} 张图片`, 'success');
+        showToast(`成功生成 ${successCount} ${isVideoMode ? '个视频' : '张图片'}`, 'success');
     }
     if (failCount > 0) {
         showToast(`${failCount} 个任务失败`, 'error');
     }
 
-    // 重新加载历史
     loadHistory();
 
-    // 隐藏进度区域
     setTimeout(() => {
         elements.progressSection.classList.add('hidden');
     }, 2000);
@@ -506,6 +611,73 @@ async function generateImage(params) {
     throw new Error('生成超时（前端轮询超时）');
 }
 
+/**
+ * 视频生成请求 (使用异步任务 + 轮询)
+ */
+async function generateVideoRequest(params) {
+    // 提交视频生成任务
+    const submitResponse = await fetch('/api/generate/video/submit', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(params)
+    });
+
+    const submitContentType = submitResponse.headers.get('content-type') || '';
+    if (!submitContentType.includes('application/json')) {
+        const text = await submitResponse.text();
+        throw new Error(`请求失败 (HTTP ${submitResponse.status})：${text.slice(0, 200)}`);
+    }
+
+    const submitData = await submitResponse.json();
+    if (!submitResponse.ok || submitData.success === false) {
+        throw new Error(submitData?.error || `请求失败 (HTTP ${submitResponse.status})`);
+    }
+
+    const jobId = submitData.jobId;
+    if (!jobId) throw new Error('提交任务失败：缺少 jobId');
+
+    // 轮询任务状态 (视频生成时间更长，最多等待 15 分钟)
+    const pollDelayMs = 5000;
+    const maxWaitMs = 15 * 60 * 1000;
+    const startPollAt = Date.now();
+
+    while (Date.now() - startPollAt < maxWaitMs) {
+        const statusResponse = await fetch(`/api/generate/status/${encodeURIComponent(jobId)}?t=${Date.now()}`, {
+            method: 'GET',
+            headers: { 'Accept': 'application/json' }
+        });
+
+        const contentType = statusResponse.headers.get('content-type') || '';
+        if (!contentType.includes('application/json')) {
+            const text = await statusResponse.text();
+            throw new Error(`请求失败 (HTTP ${statusResponse.status})：${text.slice(0, 200)}`);
+        }
+
+        const data = await statusResponse.json();
+        if (!statusResponse.ok || !data.success) {
+            throw new Error(data?.error || `请求失败 (HTTP ${statusResponse.status})`);
+        }
+
+        const job = data.job;
+        if (!job) {
+            throw new Error('任务状态异常');
+        }
+
+        if (job.status === 'completed') {
+            return { success: true, video: job.result };
+        }
+        if (job.status === 'error') {
+            throw new Error(job.error || '视频生成失败');
+        }
+
+        await new Promise(resolve => setTimeout(resolve, pollDelayMs));
+    }
+
+    throw new Error('视频生成超时（前端轮询超时）');
+}
+
 function updateProgressCount(completed, total) {
     elements.progressCount.textContent = `${completed}/${total}`;
 }
@@ -551,6 +723,53 @@ function addResultImage(url, prompt, duration = null) {
 
     // 保存到结果数组
     state.results.unshift({ url, prompt, duration });
+}
+
+function addResultVideo(videoUrl, thumbnailUrl, prompt, duration = null) {
+    // 隐藏空状态
+    elements.emptyState.classList.add('hidden');
+
+    // 创建视频卡片
+    const card = createVideoCard(videoUrl, thumbnailUrl, prompt, { duration });
+
+    // 添加到结果网格
+    elements.resultsGrid.insertBefore(card, elements.resultsGrid.firstChild);
+
+    // 保存到结果数组
+    state.results.unshift({ videoUrl, thumbnailUrl, prompt, duration, isVideo: true });
+}
+
+function createVideoCard(videoUrl, thumbnailUrl, prompt, meta = {}) {
+    const card = document.createElement('div');
+    card.className = 'image-card video-card';
+
+    const durationBadge = meta.duration ? `<span class="duration-badge">${meta.duration}s</span>` : '';
+
+    card.innerHTML = `
+        ${durationBadge}
+        <span class="video-badge">🎬 视频</span>
+        <video src="${videoUrl}" poster="${thumbnailUrl || ''}" preload="metadata" muted loop></video>
+        <div class="image-card-overlay">
+            <div class="image-card-prompt">${escapeHtml(prompt)}</div>
+        </div>
+    `;
+
+    // 悬停时播放
+    const video = card.querySelector('video');
+    card.addEventListener('mouseenter', () => {
+        video.play().catch(() => { });
+    });
+    card.addEventListener('mouseleave', () => {
+        video.pause();
+        video.currentTime = 0;
+    });
+
+    // 点击打开新窗口播放
+    card.addEventListener('click', () => {
+        window.open(videoUrl, '_blank');
+    });
+
+    return card;
 }
 
 function createImageCard(url, prompt, meta = {}) {
@@ -604,11 +823,21 @@ function renderHistory() {
     elements.historySection.classList.remove('hidden');
 
     state.history.forEach(item => {
-        const card = createImageCard(item.imageUrl, item.prompt, {
-            model: item.model,
-            resolution: item.resolution
-        });
-        elements.historyGrid.appendChild(card);
+        // 视频记录
+        if (item.videoUrl) {
+            const card = createVideoCard(item.videoUrl, item.thumbnailUrl, item.prompt, {
+                duration: item.duration
+            });
+            elements.historyGrid.appendChild(card);
+        }
+        // 图片记录
+        else if (item.imageUrl) {
+            const card = createImageCard(item.imageUrl, item.prompt, {
+                model: item.model,
+                resolution: item.resolution
+            });
+            elements.historyGrid.appendChild(card);
+        }
     });
 }
 
