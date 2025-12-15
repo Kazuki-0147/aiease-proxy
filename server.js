@@ -40,6 +40,43 @@ const MAX_POLL_TIME = 180000; // 最大等待时间 3 分钟
 const generationHistory = [];
 const MAX_HISTORY = 100;
 
+// Web UI 异步任务（内存）
+const generationJobs = new Map(); // jobId -> { status, createdAt, updatedAt, result, error, ... }
+const JOB_TTL_MS = 6 * 60 * 60 * 1000; // 6h
+
+// 上游并发控制：避免大量并发导致风控/排队/断连
+const MAX_CONCURRENT_UPSTREAM = parseInt(process.env.MAX_CONCURRENT_UPSTREAM || '10', 10);
+let upstreamRunning = 0;
+const upstreamQueue = [];
+
+function enqueueUpstream(fn) {
+    return new Promise((resolve, reject) => {
+        const run = async () => {
+            upstreamRunning++;
+            try {
+                resolve(await fn());
+            } catch (err) {
+                reject(err);
+            } finally {
+                upstreamRunning--;
+                const next = upstreamQueue.shift();
+                if (next) next();
+            }
+        };
+
+        if (upstreamRunning < MAX_CONCURRENT_UPSTREAM) run();
+        else upstreamQueue.push(run);
+    });
+}
+
+setInterval(() => {
+    const now = Date.now();
+    for (const [jobId, job] of generationJobs.entries()) {
+        const baseTime = job.updatedAt || job.createdAt || now;
+        if (now - baseTime > JOB_TTL_MS) generationJobs.delete(jobId);
+    }
+}, 60_000).unref?.();
+
 // ==================== 工具函数 ====================
 
 /**
@@ -63,11 +100,13 @@ function generateId() {
 /**
  * 获取带伪造 IP 的请求头
  */
-function getHeaders(token = null) {
-    const fakeIP = generateRandomIPv6();
+function getHeaders(token = null, fakeIPOverride = null) {
+    const fakeIP = fakeIPOverride || generateRandomIPv6();
     const headers = {
         'Content-Type': 'application/json',
         'Accept': 'application/json',
+        'Cache-Control': 'no-cache',
+        'Pragma': 'no-cache',
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
         'X-Forwarded-For': fakeIP,
         'X-Real-IP': fakeIP,
@@ -169,7 +208,7 @@ async function uploadImageToCDN(token, base64Image) {
  * 提交图片生成任务
  */
 async function submitImageGeneration(token, prompt, options = {}) {
-    const { headers } = getHeaders(token);
+    const { headers, fakeIP } = getHeaders(token, options.fakeIP);
 
     const model = options.model || 'kie_nano_banana_pro';
     const aspectRatio = options.aspectRatio || '1:1';
@@ -221,6 +260,7 @@ async function submitImageGeneration(token, prompt, options = {}) {
         }
     };
 
+    console.log(`[Generate] 使用伪造 IP: ${fakeIP}`);
     console.log(`[Generate] 提交任务: "${promptText.substring(0, 50)}..." (${genType})`);
     console.log(`[Generate] 请求体: ${JSON.stringify({ ...body, params: { ...body.params, content: body.params.content.map(c => c.type === 'image' ? { ...c, imgUrl: (c.imgUrl || '').substring(0, 80) + '...' } : c) } })}`);
 
@@ -243,17 +283,19 @@ async function submitImageGeneration(token, prompt, options = {}) {
 /**
  * 轮询获取生成结果
  */
-async function pollForResult(token, taskId) {
-    const { headers } = getHeaders(token);
+async function pollForResult(token, taskId, fakeIPOverride = null) {
+    const { headers, fakeIP } = getHeaders(token, fakeIPOverride);
     const startTime = Date.now();
     let lastResponse = null;
     let pollCount = 0;
 
+    console.log(`[Poll] 使用伪造 IP: ${fakeIP}`);
     console.log(`[Poll] 开始轮询任务 ${taskId}...`);
 
     while (Date.now() - startTime < MAX_POLL_TIME) {
         pollCount++;
-        const response = await fetch(`${AIEASE_API_BASE}/gen/v2/imgResult/${taskId}`, {
+        // 轮询接口可能被边缘缓存，增加时间戳参数强制回源
+        const response = await fetch(`${AIEASE_API_BASE}/gen/v2/imgResult/${taskId}?t=${Date.now()}`, {
             method: 'GET',
             headers
         });
@@ -301,13 +343,13 @@ async function pollForResult(token, taskId) {
  */
 async function generateImage(prompt, options = {}) {
     // 1. 获取匿名 Token
-    const { token } = await getAnonymousToken();
+    const { token, fakeIP } = await getAnonymousToken();
 
     // 2. 提交生成任务
-    const taskId = await submitImageGeneration(token, prompt, options);
+    const taskId = await submitImageGeneration(token, prompt, { ...options, fakeIP });
 
     // 3. 轮询获取结果
-    const images = await pollForResult(token, taskId);
+    const images = await pollForResult(token, taskId, fakeIP);
 
     return images;
 }
@@ -402,6 +444,117 @@ app.post('/api/generate', async (req, res) => {
             error: error.message
         });
     }
+});
+
+/**
+ * Web UI：提交异步生成任务（避免长连接被反代超时）
+ * POST /api/generate/submit
+ */
+app.post('/api/generate/submit', async (req, res) => {
+    const {
+        prompt,
+        model = 'kie_nano_banana_pro',
+        resolution = '2K',
+        aspectRatio = '1:1',
+        referenceImage = null,  // 兼容单图
+        referenceImages = []    // 多图支持
+    } = req.body || {};
+
+    if (!prompt) {
+        return res.status(400).json({ success: false, error: 'prompt is required' });
+    }
+
+    const allImages = referenceImage
+        ? [referenceImage, ...referenceImages]
+        : referenceImages;
+
+    const genType = allImages.length > 0 ? 'i2i' : 't2i';
+    const mappedModel = mapModel(model);
+
+    const jobId = generateId();
+    generationJobs.set(jobId, {
+        id: jobId,
+        status: 'queued',
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        request: {
+            prompt,
+            model,
+            mappedModel,
+            resolution,
+            aspectRatio,
+            genType,
+            referenceImagesCount: allImages.length
+        }
+    });
+
+    // 后台执行（不阻塞请求）
+    (async () => {
+        const job = generationJobs.get(jobId);
+        if (!job) return;
+
+        try {
+            const images = await enqueueUpstream(async () => {
+                job.status = 'running';
+                job.updatedAt = Date.now();
+
+                return await generateImage(prompt, {
+                    model: mappedModel,
+                    resolution,
+                    aspectRatio,
+                    referenceImages: allImages
+                });
+            });
+
+            // 写历史
+            images.forEach(img => {
+                addToHistory({
+                    prompt,
+                    model,
+                    resolution,
+                    aspectRatio,
+                    type: genType,
+                    imageUrl: img.url
+                });
+            });
+
+            job.status = 'completed';
+            job.updatedAt = Date.now();
+            job.result = {
+                images: images.map(img => ({ url: img.url }))
+            };
+        } catch (err) {
+            job.status = 'error';
+            job.updatedAt = Date.now();
+            job.error = String(err && err.message ? err.message : err);
+        }
+    })();
+
+    return res.json({ success: true, jobId });
+});
+
+/**
+ * Web UI：查询异步任务状态
+ * GET /api/generate/status/:jobId
+ */
+app.get('/api/generate/status/:jobId', (req, res) => {
+    const jobId = req.params.jobId;
+    const job = generationJobs.get(jobId);
+    if (!job) return res.status(404).json({ success: false, error: 'job not found' });
+
+    res.setHeader('Cache-Control', 'no-store');
+    return res.json({
+        success: true,
+        job: {
+            id: job.id,
+            status: job.status,
+            createdAt: job.createdAt,
+            updatedAt: job.updatedAt,
+            request: job.request,
+            result: job.result || null,
+            error: job.error || null
+        }
+    });
 });
 
 /**

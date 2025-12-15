@@ -28,6 +28,12 @@
                     </svg>
                 </div>
                 <span class="logo-text">AI EASE Studio</span>
+                <button class="mobile-close-btn" id="mobile-close-btn" type="button" aria-label="关闭参数面板">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="18" y1="6" x2="6" y2="18" />
+                        <line x1="6" y1="6" x2="18" y2="18" />
+                    </svg>
+                </button>
             </div>
 
             <!-- 模式切换 -->
@@ -138,11 +144,22 @@
                 </button>
             </div>
         </aside>
+        <div class="sidebar-backdrop hidden" id="sidebar-backdrop"></div>
 
         <!-- 主内容区 -->
         <main class="main-content">
             <!-- 输入区域 -->
             <div class="input-section">
+                <div class="mobile-toolbar">
+                    <button class="mobile-menu-btn" id="mobile-menu-btn" type="button" aria-label="打开参数面板">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <line x1="4" y1="6" x2="20" y2="6" />
+                            <line x1="4" y1="12" x2="20" y2="12" />
+                            <line x1="4" y1="18" x2="20" y2="18" />
+                        </svg>
+                        参数
+                    </button>
+                </div>
                 <!-- 图生图上传区域 -->
                 <div class="upload-area hidden" id="upload-area">
                     <div class="upload-header">

@@ -20,6 +20,12 @@ const state = {
 // ==================== DOM 元素 ====================
 
 const elements = {
+    // 移动端侧边栏
+    sidebar: document.querySelector('.sidebar'),
+    sidebarBackdrop: document.getElementById('sidebar-backdrop'),
+    mobileMenuBtn: document.getElementById('mobile-menu-btn'),
+    mobileCloseBtn: document.getElementById('mobile-close-btn'),
+
     // 模式切换
     modeBtns: document.querySelectorAll('.mode-btn'),
 
@@ -81,6 +87,9 @@ function init() {
 }
 
 function bindEvents() {
+    // 移动端：侧边栏抽屉
+    setupMobileSidebar();
+
     // 模式切换
     elements.modeBtns.forEach(btn => {
         btn.addEventListener('click', () => switchMode(btn.dataset.mode));
@@ -157,7 +166,55 @@ function bindEvents() {
 
     // ESC 关闭模态框
     document.addEventListener('keydown', (e) => {
-        if (e.key === 'Escape') closeModal();
+        if (e.key !== 'Escape') return;
+        if (closeSidebar()) return;
+        closeModal();
+    });
+}
+
+function isMobileLayout() {
+    return window.matchMedia && window.matchMedia('(max-width: 768px)').matches;
+}
+
+function openSidebar() {
+    if (!isMobileLayout()) return;
+    if (!elements.sidebar) return;
+
+    elements.sidebar.classList.add('open');
+    document.body.classList.add('sidebar-open');
+
+    if (elements.sidebarBackdrop) {
+        elements.sidebarBackdrop.classList.remove('hidden');
+    }
+}
+
+function closeSidebar() {
+    if (!elements.sidebar) return false;
+    const isOpen = elements.sidebar.classList.contains('open');
+    if (!isOpen) return false;
+
+    elements.sidebar.classList.remove('open');
+    document.body.classList.remove('sidebar-open');
+
+    if (elements.sidebarBackdrop) {
+        elements.sidebarBackdrop.classList.add('hidden');
+    }
+
+    return true;
+}
+
+function setupMobileSidebar() {
+    if (!elements.sidebar || !elements.sidebarBackdrop || !elements.mobileMenuBtn || !elements.mobileCloseBtn) {
+        return;
+    }
+
+    elements.mobileMenuBtn.addEventListener('click', openSidebar);
+    elements.mobileCloseBtn.addEventListener('click', closeSidebar);
+    elements.sidebarBackdrop.addEventListener('click', closeSidebar);
+
+    // 从移动端切回桌面时，清理抽屉状态
+    window.addEventListener('resize', () => {
+        if (!isMobileLayout()) closeSidebar();
     });
 }
 
@@ -324,13 +381,15 @@ async function handleGenerate() {
 
             const duration = ((Date.now() - startTime) / 1000).toFixed(1); // 计算耗时(秒)
 
+            const isSuccess = Boolean(result && result.success && Array.isArray(result.images) && result.images.length > 0);
+
             // 更新进度
             completed++;
             updateProgressCount(completed, tasks.length);
-            updateProgressItem(task.id, 'completed', duration);
+            updateProgressItem(task.id, isSuccess ? 'completed' : 'error', duration);
 
             // 添加结果
-            if (result.success && result.images) {
+            if (isSuccess) {
                 result.images.forEach(img => {
                     addResultImage(img.url, task.prompt, duration);
                 });
@@ -377,7 +436,8 @@ async function handleGenerate() {
 }
 
 async function generateImage(params) {
-    const response = await fetch('/api/generate', {
+    // Web UI 采用“提交任务 + 轮询结果”，避免长连接被浏览器/反代超时
+    const submitResponse = await fetch('/api/generate/submit', {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json'
@@ -385,7 +445,65 @@ async function generateImage(params) {
         body: JSON.stringify(params)
     });
 
-    return await response.json();
+    const submitContentType = submitResponse.headers.get('content-type') || '';
+    if (!submitContentType.includes('application/json')) {
+        const text = await submitResponse.text();
+        throw new Error(`请求失败 (HTTP ${submitResponse.status})：${text.slice(0, 200)}`);
+    }
+
+    const submitData = await submitResponse.json();
+    if (!submitResponse.ok) {
+        throw new Error(submitData?.error || `请求失败 (HTTP ${submitResponse.status})`);
+    }
+    if (submitData && submitData.success === false) {
+        throw new Error(submitData.error || '生成失败');
+    }
+
+    const jobId = submitData.jobId;
+    if (!jobId) throw new Error('提交任务失败：缺少 jobId');
+
+    // 轮询任务状态
+    const pollDelayMs = 3000;
+    // 10 并发在上游排队时可能超过 6 分钟，这里放宽等待时间，避免“前端超时但后端仍在生成”。
+    const maxWaitMs = 30 * 60 * 1000; // 30 分钟
+    const startPollAt = Date.now();
+
+    while (Date.now() - startPollAt < maxWaitMs) {
+        const statusResponse = await fetch(`/api/generate/status/${encodeURIComponent(jobId)}?t=${Date.now()}`, {
+            method: 'GET',
+            headers: { 'Accept': 'application/json' }
+        });
+
+        const contentType = statusResponse.headers.get('content-type') || '';
+        if (!contentType.includes('application/json')) {
+            const text = await statusResponse.text();
+            throw new Error(`请求失败 (HTTP ${statusResponse.status})：${text.slice(0, 200)}`);
+        }
+
+        const data = await statusResponse.json();
+        if (!statusResponse.ok) {
+            throw new Error(data?.error || `请求失败 (HTTP ${statusResponse.status})`);
+        }
+        if (!data.success) {
+            throw new Error(data.error || '生成失败');
+        }
+
+        const job = data.job;
+        if (!job || !job.status) {
+            throw new Error('任务状态异常');
+        }
+
+        if (job.status === 'completed') {
+            return { success: true, images: job.result?.images || [] };
+        }
+        if (job.status === 'error') {
+            throw new Error(job.error || '生成失败');
+        }
+
+        await new Promise(resolve => setTimeout(resolve, pollDelayMs));
+    }
+
+    throw new Error('生成超时（前端轮询超时）');
 }
 
 function updateProgressCount(completed, total) {

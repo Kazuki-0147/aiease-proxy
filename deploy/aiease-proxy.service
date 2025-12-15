@@ -1,0 +1,16 @@
+[Unit]
+Description=AI EASE Proxy (OpenAI-compatible API + Web UI)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/root/aiease-proxy
+Environment=NODE_ENV=production
+Environment=PORT=3000
+ExecStart=/usr/bin/node /root/aiease-proxy/server.js
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

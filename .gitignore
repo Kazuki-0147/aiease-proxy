@@ -5,6 +5,9 @@ node_modules/
 *.log
 npm-debug.log*
 
+# Runtime temp
+.tmp/
+
 # OS files
 .DS_Store
 Thumbs.db

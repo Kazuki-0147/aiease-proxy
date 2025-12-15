@@ -80,6 +80,7 @@ body {
 .app-container {
     display: flex;
     height: 100vh;
+    height: 100dvh;
 }
 
 /* ==================== 侧边栏 ==================== */
@@ -971,38 +972,156 @@ body {
     display: none !important;
 }
 
+/* ==================== 移动端：侧边栏抽屉 ==================== */
+.mobile-toolbar {
+    display: none;
+    margin-bottom: 12px;
+}
+
+.mobile-menu-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 12px;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    color: var(--text-primary);
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all var(--transition-fast);
+}
+
+.mobile-menu-btn svg {
+    width: 18px;
+    height: 18px;
+}
+
+.mobile-menu-btn:hover {
+    background: var(--bg-hover);
+}
+
+.mobile-close-btn {
+    display: none;
+    margin-left: auto;
+    width: 36px;
+    height: 36px;
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: 50%;
+    color: var(--text-secondary);
+    cursor: pointer;
+    align-items: center;
+    justify-content: center;
+    transition: all var(--transition-fast);
+}
+
+.mobile-close-btn svg {
+    width: 18px;
+    height: 18px;
+}
+
+.mobile-close-btn:hover {
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+}
+
+.sidebar-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.55);
+    backdrop-filter: blur(2px);
+    z-index: 1100;
+}
+
 /* ==================== 响应式 ==================== */
 @media (max-width: 768px) {
-    .app-container {
-        flex-direction: column;
+    .sidebar {
+        position: fixed;
+        top: 0;
+        left: 0;
+        bottom: 0;
+        width: min(320px, 86vw);
+        transform: translateX(-110%);
+        transition: transform var(--transition-normal);
+        z-index: 1200;
+        padding: 16px;
+        overflow-y: auto;
+        -webkit-overflow-scrolling: touch;
     }
 
-    .sidebar {
-        width: 100%;
-        flex-direction: row;
-        flex-wrap: wrap;
-        padding: 12px;
+    .sidebar.open {
+        transform: translateX(0);
     }
 
     .logo {
-        margin-bottom: 0;
+        margin-bottom: 20px;
     }
 
-    .mode-switch {
-        margin: 0;
-        margin-left: auto;
+    .mobile-close-btn {
+        display: inline-flex;
     }
 
-    .params-panel {
-        display: none;
+    .mobile-toolbar {
+        display: flex;
     }
 
-    .quick-actions {
-        display: none;
+    body {
+        overflow: auto;
+    }
+
+    body.sidebar-open {
+        overflow: hidden;
+    }
+
+    .app-container {
+        height: auto;
+        min-height: 100dvh;
+    }
+
+    .main-content {
+        overflow: visible;
+    }
+
+    .input-section {
+        padding: 16px;
+    }
+
+    .prompt-container {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .generate-btn {
+        width: 100%;
+        justify-content: center;
+        padding: 14px 16px;
+    }
+
+    .results-section,
+    .history-section {
+        flex: none;
+        overflow: visible;
+        padding: 16px;
+    }
+
+    .aspect-ratio-grid {
+        grid-template-columns: repeat(4, 1fr);
     }
 
     .results-grid,
     .history-grid {
         grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    }
+
+    .toast-container {
+        top: 12px;
+        right: 12px;
+        left: 12px;
+    }
+
+    .toast {
+        width: 100%;
     }
 }
