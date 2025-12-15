@@ -130,14 +130,57 @@ async function getAnonymousToken() {
     const { headers, fakeIP } = getHeaders();
 
     console.log(`[Token] 使用伪造 IP: ${fakeIP}`);
+    console.log(`[Token] 正在请求 Token...`);
 
-    const response = await fetch(`${AIEASE_API_BASE}/user/v2/visit`, {
-        method: 'POST',
-        headers,
-        body: '{}'
-    });
+    let response;
+    try {
+        response = await fetch(`${AIEASE_API_BASE}/user/v2/visit`, {
+            method: 'POST',
+            headers,
+            body: '{}'
+        });
+    } catch (networkError) {
+        // 网络层面的错误（DNS 解析失败、连接超时、TLS 错误等）
+        console.error(`[Token] ❌ 网络请求失败: ${networkError.message}`);
+        console.error(`[Token] 请检查服务器是否能访问 www.aiease.ai`);
+        throw new Error(`Token 网络请求失败: ${networkError.message}`);
+    }
 
-    const data = await response.json();
+    console.log(`[Token] 响应状态: ${response.status} ${response.statusText}`);
+
+    // 非 200 状态码直接报错
+    if (response.status !== 200) {
+        console.error(`[Token] ❌ 获取失败! HTTP 状态码: ${response.status}`);
+        const errorText = await response.text().catch(() => '无法读取响应内容');
+        console.error(`[Token] 响应内容: ${errorText.substring(0, 500)}`);
+        throw new Error(`Token 获取失败: HTTP ${response.status} - ${response.statusText}`);
+    }
+
+    // 先获取文本内容
+    let responseText;
+    try {
+        responseText = await response.text();
+    } catch (textError) {
+        console.error(`[Token] 读取响应内容失败: ${textError.message}`);
+        throw new Error(`Token 读取响应失败: ${textError.message}`);
+    }
+
+    // 检查是否是 HTML 错误页（Cloudflare 拦截、服务器错误等）
+    if (responseText.trim().startsWith('<!') || responseText.trim().startsWith('<html')) {
+        console.error(`[Token] 返回了 HTML 页面而非 JSON，可能被 Cloudflare 拦截或服务器错误`);
+        console.error(`[Token] 响应内容前 500 字符: ${responseText.substring(0, 500)}`);
+        throw new Error(`Token 请求返回 HTML 页面 (HTTP ${response.status})，可能是 IP 被风控或网络问题`);
+    }
+
+    // 解析 JSON
+    let data;
+    try {
+        data = JSON.parse(responseText);
+    } catch (jsonError) {
+        console.error(`[Token] JSON 解析失败: ${jsonError.message}`);
+        console.error(`[Token] 原始响应: ${responseText.substring(0, 500)}`);
+        throw new Error(`Token 响应不是有效 JSON: ${responseText.substring(0, 200)}`);
+    }
 
     if (data.code === 200 && data.result && data.result.token) {
         console.log(`[Token] 获取成功: 用户ID ${data.result.id}`);
@@ -148,6 +191,8 @@ async function getAnonymousToken() {
         };
     }
 
+    // API 返回了 JSON 但不是成功状态
+    console.error(`[Token] API 返回错误: ${JSON.stringify(data)}`);
     throw new Error('获取匿名 Token 失败: ' + JSON.stringify(data));
 }
 
