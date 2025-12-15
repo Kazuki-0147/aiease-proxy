@@ -22,7 +22,6 @@ npm start
 ```
 
 服务器将在 http://localhost:3000 启动。
-<img width="2551" height="1206" alt="屏幕截图 2025-12-14 215229" src="https://github.com/user-attachments/assets/ada7905c-d856-4f8b-b24c-e27b2d428ab4" />
 
 
 ## 📡 API 端点
@@ -42,7 +41,7 @@ npm start
 ### Web UI
 
 直接访问 http://localhost:3000 使用图形界面：
-
+<img width="2551" height="1206" alt="屏幕截图 2025-12-14 215229" src="https://github.com/user-attachments/assets/ada7905c-d856-4f8b-b24c-e27b2d428ab4" />
 - 选择 **文生图** 或 **图生图** 模式
 - 输入提示词，调整参数
 - 图生图支持最多 5 张参考图片
