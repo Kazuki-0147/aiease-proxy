@@ -53,14 +53,16 @@ const MODEL_CONFIG = {
         model: 'kie_nano_banana_pro',
         supportsI2i: true,
         aspectRatioFormat: 'colon', // 1:1
-        supportsResolution: true
+        supportsResolution: true,
+        requiresAieaseOss: true  // 使用 AI EASE 官方上传
     },
     'kie_nano_banana': {
         genType: 'kie_nano_banana',
         model: 'kie_nano_banana',
         supportsI2i: true,
         aspectRatioFormat: 'colon',
-        supportsResolution: true
+        supportsResolution: true,
+        requiresAieaseOss: true  // 使用 AI EASE 官方上传
     },
     // Al Ease Model (不支持图生图)
     'wf_art': {
@@ -77,7 +79,7 @@ const MODEL_CONFIG = {
         supportsI2i: true,
         aspectRatioFormat: 'colon',
         supportsResolution: true,
-        requiresAieaseOss: true  // 需要使用 AI EASE 官方上传
+        requiresAieaseOss: true  // 使用 AI EASE 官方上传
     },
     // Seedream 4.5
     'doubao-seedream-4.5': {
@@ -86,7 +88,7 @@ const MODEL_CONFIG = {
         supportsI2i: true,
         aspectRatioFormat: 'colon',
         supportsResolution: true,
-        requiresAieaseOss: true  // 需要使用 AI EASE 官方上传
+        requiresAieaseOss: true  // 使用 AI EASE 官方上传
     }
 };
 
