@@ -968,9 +968,8 @@ async function generateImage(params) {
     if (!jobId) throw new Error('提交任务失败：缺少 jobId');
 
     // 轮询任务状态
-    const pollDelayMs = 3000;
-    // 10 并发在上游排队时可能超过 6 分钟，这里放宽等待时间，避免“前端超时但后端仍在生成”。
-    const maxWaitMs = 30 * 60 * 1000; // 30 分钟
+    const pollDelayMs = 3000; // 每 3 秒轮询一次
+    const maxWaitMs = 180 * 1000; // 180 秒（3 分钟）超时
     const startPollAt = Date.now();
 
     while (Date.now() - startPollAt < maxWaitMs) {
@@ -1011,7 +1010,7 @@ async function generateImage(params) {
         await new Promise(resolve => setTimeout(resolve, pollDelayMs));
     }
 
-    throw new Error('生成超时（前端轮询超时）');
+    throw new Error('图片生成超时（超过 180 秒）');
 }
 
 /**
@@ -1059,9 +1058,9 @@ async function generateVideoRequest(params) {
     const jobId = submitData.jobId;
     if (!jobId) throw new Error('提交任务失败：缺少 jobId');
 
-    // 轮询任务状态 (视频生成时间更长，最多等待 15 分钟)
-    const pollDelayMs = 5000;
-    const maxWaitMs = 15 * 60 * 1000;
+    // 轮询任务状态（视频生成时间较长，给予更长的等待时间）
+    const pollDelayMs = 5000; // 每 5 秒轮询一次
+    const maxWaitMs = 10 * 60 * 1000; // 10 分钟超时（与后端保持一致）
     const startPollAt = Date.now();
 
     while (Date.now() - startPollAt < maxWaitMs) {
@@ -1099,7 +1098,7 @@ async function generateVideoRequest(params) {
         await new Promise(resolve => setTimeout(resolve, pollDelayMs));
     }
 
-    throw new Error('视频生成超时（前端轮询超时）');
+    throw new Error('视频生成超时（超过 10 分钟）');
 }
 
 // updateProgressCount 已废弃

@@ -1,6 +1,7 @@
 const { sequelize } = require('../config/database');
-const User = require('../models/User');
-const History = require('../models/History');
+// 导入模型以确保它们被注册到 Sequelize
+require('../models/User');
+require('../models/History');
 
 async function sync() {
     try {

@@ -44,10 +44,12 @@ const History = sequelize.define('History', {
 }, {
     indexes: [
         {
-            fields: ['user_id']
+            // Sequelize 会自动将 userId 转换为 user_id (因为 underscored: true)
+            fields: ['userId']
         },
         {
-            fields: ['created_at']
+            // Sequelize 会自动将 createdAt 转换为 created_at (因为 underscored: true)
+            fields: ['createdAt']
         }
     ]
 });

@@ -55,14 +55,29 @@ async function testConnection() {
     try {
         await sequelize.authenticate();
         console.log(`[Database] ✅ ${dbType.toUpperCase()} connection established successfully.`);
-        
+
         // Sync models (create tables if not exists)
-        // 在生产环境中通常使用 migration，但在本项目中为了简化部署，使用 sync
+        // ⚠️ 生产环境警告：使用 sync({ alter: true }) 存在风险
+        if (process.env.NODE_ENV === 'production') {
+            console.warn('[Database] ⚠️  生产环境检测到！');
+            console.warn('[Database] ⚠️  使用 sync({ alter: true }) 可能导致数据丢失或表结构损坏。');
+            console.warn('[Database] ⚠️  强烈建议使用数据库迁移工具（如 sequelize-cli 或 umzug）管理 schema 变更。');
+            console.warn('[Database] ⚠️  如需继续使用 sync，请设置环境变量 ALLOW_SYNC_IN_PRODUCTION=true');
+
+            if (process.env.ALLOW_SYNC_IN_PRODUCTION !== 'true') {
+                throw new Error(
+                    '生产环境禁止使用 sequelize.sync()。\n' +
+                    '请使用数据库迁移工具管理 schema 变更，或设置 ALLOW_SYNC_IN_PRODUCTION=true 强制启用（不推荐）。'
+                );
+            }
+
+            console.warn('[Database] ⚠️  检测到 ALLOW_SYNC_IN_PRODUCTION=true，继续执行 sync（风险自负）...');
+        }
+
         await sequelize.sync({ alter: true });
         console.log('[Database] ✅ Models synchronized.');
     } catch (error) {
         console.error(`[Database] ❌ Unable to connect to ${dbType.toUpperCase()}:`, error.message);
-        // Don't throw error here to allow server to start (maybe in memory mode if needed, but for now we want it to fail hard if DB fails)
         throw error;
     }
 }

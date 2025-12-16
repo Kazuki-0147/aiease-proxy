@@ -54,7 +54,16 @@ function resolveJwtSecret() {
 const { secret, source } = resolveJwtSecret();
 
 if (!secret) {
-    throw new Error('JWT_SECRET 未配置：请设置环境变量 JWT_SECRET（生产环境必须）');
+    throw new Error(
+        'JWT_SECRET 未配置：服务无法在生产环境启动。\n' +
+        '请设置环境变量 JWT_SECRET，例如：\n' +
+        '  export JWT_SECRET=your_secret_key_here\n' +
+        '或在项目根目录的 .env 文件中添加：\n' +
+        '  JWT_SECRET=your_secret_key_here\n' +
+        '建议使用至少 64 字符的随机字符串。\n' +
+        '可以使用以下命令生成：\n' +
+        '  node -e "console.log(require(\'crypto\').randomBytes(48).toString(\'hex\'))"'
+    );
 }
 
 if (source === 'generated') {
