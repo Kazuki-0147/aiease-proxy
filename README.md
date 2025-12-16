@@ -1,6 +1,6 @@
 # AI EASE Proxy
 
-将 AI EASE 图像/视频生成服务封装为 OpenAI 兼容的 API，并提供现代化的 Web UI。
+将 AI EASE 图像/视频生成服务封装为 OpenAI 兼容的 API，并提供现代化的 Web UI。[多用户分支](https://github.com/Kazuki-0147/aiease-proxy/tree/multi-user)
 
 ## ✨ 功能特性
 
