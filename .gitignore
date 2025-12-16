@@ -15,10 +15,17 @@ Thumbs.db
 # IDE
 .vscode/
 .idea/
+.claude/
+.serena/
 
 # Environment
 .env
 .env.local
+.jwt_secret.dev
+
+# Database
+database.sqlite
+*.sqlite
 
 # 抓包文件
 *抓包/

@@ -5,6 +5,7 @@
 // ==================== 状态管理 ====================
 
 const state = {
+    currentView: 'create', // 'create', 'gallery'
     mode: 't2i', // 't2i', 'i2i', 't2v', 'i2v'
     model: 'kie_nano_banana_pro',
     resolution: '2K',
@@ -12,19 +13,51 @@ const state = {
     concurrent: 1,
     referenceImages: [], // 多图支持 - 存储 base64 数组
     maxImages: 5,
-    activeTasks: new Map(),
+    activeTasks: new Map(), // 存储正在运行的任务
     results: [],
     history: [],
     // 视频参数
     videoDuration: 5,
     videoResolution: '720p',
     videoMode: 'pro',
-    videoRatio: '16:9'
+    videoRatio: '16:9',
+    // 认证状态
+    token: localStorage.getItem('auth_token'),
+    user: JSON.parse(localStorage.getItem('auth_user') || 'null')
 };
 
 // ==================== DOM 元素 ====================
 
 const elements = {
+    // 导航与视图
+    navBtns: document.querySelectorAll('.nav-btn'),
+    viewCreate: document.getElementById('view-create'),
+    viewGallery: document.getElementById('view-gallery'),
+    paramsPanelContainer: document.getElementById('params-panel-container'),
+    modeSwitchContainer: document.getElementById('mode-switch-container'),
+    refreshGalleryBtn: document.getElementById('refresh-gallery-btn'),
+
+    // 认证相关
+    authModal: document.getElementById('auth-modal'),
+    authForm: document.getElementById('auth-form'),
+    authTabs: document.querySelectorAll('.auth-tab'),
+    authTitle: document.getElementById('auth-title'),
+    authSubtitle: document.getElementById('auth-subtitle'),
+    authSubmitBtn: document.querySelector('.auth-submit-btn'),
+    usernameInput: document.getElementById('username-input'),
+    passwordInput: document.getElementById('password-input'),
+    confirmPasswordInput: document.getElementById('confirm-password-input'),
+    confirmPasswordGroup: document.getElementById('confirm-password-group'),
+    togglePasswordBtn: document.querySelector('.toggle-password-btn'),
+    userProfile: document.getElementById('user-profile'),
+    loginTriggerBtn: document.getElementById('login-trigger-btn'),
+    userNameDisplay: document.getElementById('user-name-display'),
+    logoutBtn: document.getElementById('logout-btn'),
+    
+    // 免责声明
+    disclaimerModal: document.getElementById('disclaimer-modal'),
+    acceptDisclaimerBtn: document.getElementById('accept-disclaimer-btn'),
+
     // 移动端侧边栏
     sidebar: document.querySelector('.sidebar'),
     sidebarBackdrop: document.getElementById('sidebar-backdrop'),
@@ -54,16 +87,16 @@ const elements = {
 
     // 进度
     progressSection: document.getElementById('progress-section'),
-    progressCount: document.getElementById('progress-count'),
+    // progressCount: document.getElementById('progress-count'), // 已移除
     progressList: document.getElementById('progress-list'),
+    clearProgressBtn: document.getElementById('clear-progress-btn'),
 
     // 结果
     resultsSection: document.getElementById('results-section'),
     resultsGrid: document.getElementById('results-grid'),
     emptyState: document.getElementById('empty-state'),
 
-    // 历史
-    historySection: document.getElementById('history-section'),
+    // 历史 (图库视图)
     historyGrid: document.getElementById('history-grid'),
     historyCount: document.getElementById('history-count'),
     clearHistoryBtn: document.getElementById('clear-history-btn'),
@@ -90,20 +123,73 @@ const elements = {
 // ==================== 初始化 ====================
 
 function init() {
+    // 检查免责声明
+    checkDisclaimer();
+
+    // 检查登录状态
+    checkAuthStatus();
+
     // 绑定事件
     bindEvents();
 
-    // 加载历史记录
-    loadHistory();
+    // 初始化视图
+    switchView('create');
+
+    // 加载历史记录 (如果已登录)
+    if (state.token) {
+        loadHistory();
+    }
 
     console.log('AI EASE Studio 已初始化');
 }
 
+function syncToggleGroupAria(buttons) {
+    buttons.forEach(btn => {
+        // 这些按钮不是表单提交按钮，避免未来结构调整时触发表单提交
+        if (btn instanceof HTMLButtonElement) {
+            btn.type = 'button';
+        }
+        btn.setAttribute('aria-pressed', btn.classList.contains('active') ? 'true' : 'false');
+    });
+}
+
+function setActiveToggle(buttons, activeBtn) {
+    buttons.forEach(btn => {
+        const isActive = btn === activeBtn;
+        btn.classList.toggle('active', isActive);
+        btn.setAttribute('aria-pressed', isActive ? 'true' : 'false');
+    });
+}
+
 function bindEvents() {
+    // 导航事件
+    elements.navBtns.forEach(btn => {
+        btn.addEventListener('click', () => switchView(btn.dataset.view));
+    });
+
+    // 刷新图库
+    if (elements.refreshGalleryBtn) {
+        elements.refreshGalleryBtn.addEventListener('click', loadHistory);
+    }
+
+    // 清除进度
+    if (elements.clearProgressBtn) {
+        elements.clearProgressBtn.addEventListener('click', clearCompletedProgress);
+    }
+
+    // 认证事件
+    bindAuthEvents();
+
+    // 密码显示切换
+    if (elements.togglePasswordBtn) {
+        elements.togglePasswordBtn.addEventListener('click', togglePasswordVisibility);
+    }
+
     // 移动端：侧边栏抽屉
     setupMobileSidebar();
 
     // 模式切换
+    syncToggleGroupAria(elements.modeBtns);
     elements.modeBtns.forEach(btn => {
         btn.addEventListener('click', () => switchMode(btn.dataset.mode));
     });
@@ -114,58 +200,60 @@ function bindEvents() {
     });
 
     // 分辨率选择
+    syncToggleGroupAria(elements.resolutionBtns);
     elements.resolutionBtns.forEach(btn => {
         btn.addEventListener('click', () => {
-            elements.resolutionBtns.forEach(b => b.classList.remove('active'));
-            btn.classList.add('active');
+            setActiveToggle(elements.resolutionBtns, btn);
             state.resolution = btn.dataset.resolution;
         });
     });
 
     // 宽高比选择
+    syncToggleGroupAria(elements.aspectBtns);
     elements.aspectBtns.forEach(btn => {
         btn.addEventListener('click', () => {
-            elements.aspectBtns.forEach(b => b.classList.remove('active'));
-            btn.classList.add('active');
+            setActiveToggle(elements.aspectBtns, btn);
             state.aspectRatio = btn.dataset.ratio;
         });
     });
 
     // 并发数
-    elements.concurrentSlider.addEventListener('input', (e) => {
-        state.concurrent = parseInt(e.target.value);
-        elements.concurrentValue.textContent = state.concurrent;
-    });
+    if (elements.concurrentSlider) {
+        elements.concurrentSlider.addEventListener('input', (e) => {
+            state.concurrent = parseInt(e.target.value);
+            elements.concurrentValue.textContent = state.concurrent;
+        });
+    }
 
     // 视频参数事件绑定
+    syncToggleGroupAria(elements.durationBtns);
     elements.durationBtns.forEach(btn => {
         btn.addEventListener('click', () => {
-            elements.durationBtns.forEach(b => b.classList.remove('active'));
-            btn.classList.add('active');
+            setActiveToggle(elements.durationBtns, btn);
             state.videoDuration = parseInt(btn.dataset.duration);
         });
     });
 
+    syncToggleGroupAria(elements.videoResolutionBtns);
     elements.videoResolutionBtns.forEach(btn => {
         btn.addEventListener('click', () => {
-            elements.videoResolutionBtns.forEach(b => b.classList.remove('active'));
-            btn.classList.add('active');
+            setActiveToggle(elements.videoResolutionBtns, btn);
             state.videoResolution = btn.dataset.videoResolution;
         });
     });
 
+    syncToggleGroupAria(elements.videoModeBtns);
     elements.videoModeBtns.forEach(btn => {
         btn.addEventListener('click', () => {
-            elements.videoModeBtns.forEach(b => b.classList.remove('active'));
-            btn.classList.add('active');
+            setActiveToggle(elements.videoModeBtns, btn);
             state.videoMode = btn.dataset.videoMode;
         });
     });
 
+    syncToggleGroupAria(elements.videoRatioBtns);
     elements.videoRatioBtns.forEach(btn => {
         btn.addEventListener('click', () => {
-            elements.videoRatioBtns.forEach(b => b.classList.remove('active'));
-            btn.classList.add('active');
+            setActiveToggle(elements.videoRatioBtns, btn);
             state.videoRatio = btn.dataset.videoRatio;
         });
     });
@@ -264,6 +352,280 @@ function setupMobileSidebar() {
     });
 }
 
+// ==================== 认证与免责声明 ====================
+
+function checkDisclaimer() {
+    if (!localStorage.getItem('disclaimer_accepted')) {
+        elements.disclaimerModal.classList.remove('hidden');
+    }
+}
+
+function bindAuthEvents() {
+    // 免责声明同意
+    if (elements.acceptDisclaimerBtn instanceof HTMLButtonElement) {
+        elements.acceptDisclaimerBtn.type = 'button';
+    }
+    elements.acceptDisclaimerBtn.addEventListener('click', () => {
+        localStorage.setItem('disclaimer_accepted', 'true');
+        elements.disclaimerModal.classList.add('hidden');
+        // 如果未登录，显示登录弹窗
+        if (!state.token) {
+            openAuthModal();
+        }
+    });
+
+    // 打开登录弹窗
+    if (elements.loginTriggerBtn instanceof HTMLButtonElement) {
+        elements.loginTriggerBtn.type = 'button';
+    }
+    elements.loginTriggerBtn.addEventListener('click', openAuthModal);
+
+    // 切换登录/注册 Tab
+    elements.authTabs.forEach(tab => {
+        if (tab instanceof HTMLButtonElement) {
+            tab.type = 'button';
+        }
+        tab.addEventListener('click', (e) => {
+            e.preventDefault(); // 防止表单提交
+            switchAuthTab(tab.dataset.tab);
+        });
+    });
+
+    // 提交表单
+    elements.authForm.addEventListener('submit', handleAuthSubmit);
+
+    // 退出登录
+    elements.logoutBtn.addEventListener('click', logout);
+}
+
+function checkAuthStatus() {
+    if (state.token && state.user) {
+        // 已登录
+        elements.userProfile.classList.remove('hidden');
+        elements.loginTriggerBtn.classList.add('hidden');
+        elements.userNameDisplay.textContent = state.user.username;
+        elements.authModal.classList.add('hidden');
+    } else {
+        // 未登录
+        elements.userProfile.classList.add('hidden');
+        elements.loginTriggerBtn.classList.remove('hidden');
+        // 如果已经同意了免责声明，则强制登录
+        if (localStorage.getItem('disclaimer_accepted')) {
+            openAuthModal();
+        }
+    }
+}
+
+function openAuthModal() {
+    elements.authModal.classList.remove('hidden');
+    switchAuthTab('login');
+}
+
+function switchAuthTab(type) {
+    elements.authTabs.forEach(tab => {
+        tab.classList.toggle('active', tab.dataset.tab === type);
+    });
+
+    const isLogin = type === 'login';
+    elements.authTitle.textContent = isLogin ? '欢迎回来' : '创建账号';
+    elements.authSubtitle.textContent = isLogin ? '请登录以继续使用 AI EASE Studio' : '注册新账号开始创作';
+    elements.authSubmitBtn.querySelector('.btn-text').textContent = isLogin ? '登录' : '注册';
+    
+    // 清空输入框
+    elements.usernameInput.value = '';
+    elements.passwordInput.value = '';
+    if (elements.confirmPasswordInput) elements.confirmPasswordInput.value = '';
+    
+    // 切换确认密码框显示
+    if (elements.confirmPasswordGroup) {
+        if (isLogin) {
+            elements.confirmPasswordGroup.classList.add('hidden');
+            elements.confirmPasswordInput.required = false;
+        } else {
+            elements.confirmPasswordGroup.classList.remove('hidden');
+            elements.confirmPasswordInput.required = true;
+        }
+    }
+    
+    // 标记当前模式
+    elements.authForm.dataset.mode = type;
+
+    // 切换 Tab 后重置密码显示状态，避免“眼睛状态”和输入框 type 不一致
+    setPasswordVisibility(false);
+}
+
+function setPasswordVisibility(visible) {
+    const input = elements.passwordInput;
+    const btn = elements.togglePasswordBtn;
+    if (!input || !btn) return;
+
+    const eyeIcon = btn.querySelector('.eye-icon');
+    const eyeOffIcon = btn.querySelector('.eye-off-icon');
+
+    input.type = visible ? 'text' : 'password';
+
+    // 注册模式下有“确认密码”，统一跟随显示/隐藏，避免两框表现不一致
+    if (elements.confirmPasswordInput) {
+        elements.confirmPasswordInput.type = visible ? 'text' : 'password';
+    }
+
+    if (eyeIcon) eyeIcon.classList.toggle('hidden', visible);
+    if (eyeOffIcon) eyeOffIcon.classList.toggle('hidden', !visible);
+
+    btn.setAttribute('aria-label', visible ? '隐藏密码' : '显示密码');
+}
+
+function togglePasswordVisibility() {
+    if (!elements.passwordInput) return;
+    setPasswordVisibility(elements.passwordInput.type === 'password');
+}
+
+async function handleAuthSubmit(e) {
+    e.preventDefault();
+    
+    const mode = elements.authForm.dataset.mode || 'login';
+    const username = elements.usernameInput.value.trim();
+    const password = elements.passwordInput.value.trim();
+    const btn = elements.authSubmitBtn;
+    const loader = btn.querySelector('.btn-loader');
+    const btnText = btn.querySelector('.btn-text');
+
+    if (!username || !password) {
+        showToast('请输入用户名和密码', 'error');
+        return;
+    }
+
+    if (mode === 'register') {
+        const confirmPassword = elements.confirmPasswordInput.value.trim();
+        if (password !== confirmPassword) {
+            showToast('两次输入的密码不一致', 'error');
+            return;
+        }
+    }
+
+    // Loading 状态
+    btn.disabled = true;
+    loader.classList.remove('hidden');
+    btnText.classList.add('hidden');
+
+    try {
+        const endpoint = mode === 'login' ? '/api/auth/login' : '/api/auth/register';
+        const response = await fetch(endpoint, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username, password })
+        });
+
+        const contentType = response.headers.get('content-type') || '';
+        if (!contentType.includes('application/json')) {
+            const text = await response.text();
+            throw new Error(`请求失败 (HTTP ${response.status})：${text.slice(0, 200)}`);
+        }
+
+        const data = await response.json();
+        if (!response.ok) {
+            showToast(data?.error || `请求失败 (HTTP ${response.status})`, 'error');
+            return;
+        }
+
+        if (data.success) {
+            if (!data.token || !data.user) {
+                showToast('服务端响应异常：缺少 token 或 user', 'error');
+                return;
+            }
+            // 登录成功
+            state.token = data.token;
+            state.user = data.user;
+            
+            localStorage.setItem('auth_token', data.token);
+            localStorage.setItem('auth_user', JSON.stringify(data.user));
+            
+            checkAuthStatus();
+            showToast(mode === 'login' ? '登录成功' : '注册成功', 'success');
+            loadHistory(); // 加载用户历史
+        } else {
+            showToast(data.error || '操作失败', 'error');
+        }
+    } catch (error) {
+        showToast('网络请求失败', 'error');
+        console.error(error);
+    } finally {
+        // 恢复按钮状态
+        btn.disabled = false;
+        loader.classList.add('hidden');
+        btnText.classList.remove('hidden');
+    }
+}
+
+function logout() {
+    if (confirm('确定要退出登录吗？')) {
+        state.token = null;
+        state.user = null;
+        localStorage.removeItem('auth_token');
+        localStorage.removeItem('auth_user');
+        
+        // 清空界面数据
+        state.history = [];
+        renderHistory();
+        
+        checkAuthStatus();
+        showToast('已退出登录', 'success');
+    }
+}
+
+function forceLogoutAndReauth(message) {
+    state.token = null;
+    state.user = null;
+    localStorage.removeItem('auth_token');
+    localStorage.removeItem('auth_user');
+
+    // 清空界面数据
+    state.history = [];
+    renderHistory();
+
+    checkAuthStatus();
+    showToast(message || '登录已失效，请重新登录', 'error');
+    openAuthModal();
+}
+
+// ==================== 视图切换 ====================
+
+function switchView(viewName) {
+    state.currentView = viewName;
+
+    // 更新导航按钮状态
+    elements.navBtns.forEach(btn => {
+        const isActive = btn.dataset.view === viewName;
+        btn.classList.toggle('active', isActive);
+        btn.setAttribute('aria-pressed', isActive ? 'true' : 'false');
+    });
+
+    // 切换主内容区显示
+    if (viewName === 'create') {
+        elements.viewCreate.classList.add('active');
+        elements.viewGallery.classList.remove('active');
+        
+        // 显示参数面板和模式切换
+        if (elements.paramsPanelContainer) elements.paramsPanelContainer.classList.remove('hidden');
+        if (elements.modeSwitchContainer) elements.modeSwitchContainer.classList.remove('hidden');
+        
+        // 移动端侧边栏处理：创作模式下显示参数面板
+        if (isMobileLayout()) {
+            // 保持侧边栏状态逻辑不变
+        }
+    } else if (viewName === 'gallery') {
+        elements.viewCreate.classList.remove('active');
+        elements.viewGallery.classList.add('active');
+        
+        // 隐藏参数面板和模式切换，给图库更大空间
+        if (elements.paramsPanelContainer) elements.paramsPanelContainer.classList.add('hidden');
+        if (elements.modeSwitchContainer) elements.modeSwitchContainer.classList.add('hidden');
+        
+        // 加载最新历史
+        if (state.token) loadHistory();
+    }
+}
+
 // ==================== 模式切换 ====================
 
 function switchMode(mode) {
@@ -271,7 +633,9 @@ function switchMode(mode) {
 
     // 更新按钮状态
     elements.modeBtns.forEach(btn => {
-        btn.classList.toggle('active', btn.dataset.mode === mode);
+        const isActive = btn.dataset.mode === mode;
+        btn.classList.toggle('active', isActive);
+        btn.setAttribute('aria-pressed', isActive ? 'true' : 'false');
     });
 
     const isVideoMode = mode === 't2v' || mode === 'i2v';
@@ -324,7 +688,7 @@ function switchMode(mode) {
     // 更新生成按钮文字
     const btnText = elements.generateBtn.querySelector('.btn-text');
     if (btnText) {
-        btnText.textContent = isVideoMode ? '生成视频' : '生成';
+        btnText.textContent = isVideoMode ? '生成视频' : '立即生成';
     }
 }
 
@@ -391,7 +755,7 @@ function renderUploadGrid() {
     });
 
     // 更新计数
-    elements.uploadCount.textContent = `${state.referenceImages.length}/${state.maxImages} 张`;
+    elements.uploadCount.textContent = `${state.referenceImages.length}/${state.maxImages}`;
 
     // 隐藏/显示添加按钮
     elements.uploadAddBtn.classList.toggle('hidden', state.referenceImages.length >= state.maxImages);
@@ -415,140 +779,176 @@ async function handleGenerate() {
         return;
     }
 
-    // 禁用按钮
-    elements.generateBtn.disabled = true;
+    // 不再禁用按钮，允许并发提交
+    // elements.generateBtn.disabled = true;
 
-    // 显示进度区域
+    // 显示进度区域（如果之前隐藏了）
     elements.progressSection.classList.remove('hidden');
     elements.emptyState.classList.add('hidden');
-
-    // 清空之前的进度
-    elements.progressList.innerHTML = '';
 
     // 并发数量
     const taskCount = state.concurrent;
 
-    // 创建任务
-    const tasks = [];
+    // 创建批次ID（用于日志或分组，可选）
+    const batchId = generateId();
+    console.log(`[Batch ${batchId}] 开始提交 ${taskCount} 个任务`);
+
+    // 启动任务循环
     for (let i = 0; i < taskCount; i++) {
         const taskId = generateId();
-        tasks.push({
-            id: taskId,
-            prompt,
-            index: i + 1
+        const taskName = isVideoMode ? '视频生成' : `图片生成 #${taskId.slice(-4)}`;
+        
+        // 1. 添加进度条 UI
+        addProgressItem(taskId, taskName);
+        
+        // 2. 异步执行任务（不阻塞主线程，不等待 Promise.all）
+        // 这里的 delay 是为了避免瞬间发起过多请求导致浏览器卡顿或被限流
+        const delayMs = i * 1500;
+        
+        executeTaskAsync(taskId, prompt, delayMs, isVideoMode).catch(err => {
+            console.error(`任务 ${taskId} 异常:`, err);
+            updateProgressItem(taskId, 'error');
         });
-
-        // 添加进度项
-        const progressItem = document.createElement('div');
-        progressItem.className = 'progress-item';
-        progressItem.id = `progress-${taskId}`;
-        progressItem.innerHTML = `
-            <div class="progress-spinner"></div>
-            <span>${isVideoMode ? '视频生成中 (可能需要几分钟)' : `任务 ${i + 1}`}</span>
-        `;
-        elements.progressList.appendChild(progressItem);
     }
 
-    // 更新进度计数
-    updateProgressCount(0, tasks.length);
+    showToast(`已提交 ${taskCount} 个任务`, 'success');
+}
 
-    // 限流执行任务
-    let completed = 0;
-    const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+// 独立的异步任务执行器
+async function executeTaskAsync(taskId, prompt, delayMs, isVideoMode) {
+    if (delayMs > 0) {
+        await new Promise(resolve => setTimeout(resolve, delayMs));
+    }
 
-    const executeTask = async (task, index) => {
-        if (index > 0) {
-            await delay(index * 2000);
+    const startTime = Date.now();
+    
+    try {
+        let result;
+        // 捕获当前参数快照，避免任务执行时 state 发生变化
+        const currentParams = {
+            model: state.model,
+            resolution: state.resolution,
+            aspectRatio: state.aspectRatio,
+            videoRatio: state.videoRatio,
+            videoResolution: state.videoResolution,
+            videoDuration: state.videoDuration,
+            videoMode: state.videoMode,
+            // 深拷贝引用图片数组
+            referenceImages: [...state.referenceImages]
+        };
+
+        if (isVideoMode) {
+            // 视频生成
+            result = await generateVideoRequest({
+                prompt: prompt,
+                ratio: currentParams.videoRatio,
+                resolution: currentParams.videoResolution,
+                duration: currentParams.videoDuration,
+                mode: currentParams.videoMode,
+                referenceImage: state.mode === 'i2v' ? currentParams.referenceImages[0] : null
+            });
+        } else {
+            // 图片生成
+            result = await generateImage({
+                prompt: prompt,
+                model: currentParams.model,
+                resolution: currentParams.resolution,
+                aspectRatio: currentParams.aspectRatio,
+                referenceImages: state.mode === 'i2i' ? currentParams.referenceImages : []
+            });
         }
 
-        const startTime = Date.now();
+        const duration = ((Date.now() - startTime) / 1000).toFixed(1);
+        const isSuccess = isVideoMode
+            ? Boolean(result && result.success && result.video && result.video.videoUrl)
+            : Boolean(result && result.success && Array.isArray(result.images) && result.images.length > 0);
 
-        try {
-            let result;
+        // 更新进度条状态
+        updateProgressItem(taskId, isSuccess ? 'completed' : 'error', duration);
+
+        if (isSuccess) {
+            // 实时上屏
             if (isVideoMode) {
-                // 视频生成
-                result = await generateVideoRequest({
-                    prompt: task.prompt,
-                    ratio: state.videoRatio,
-                    resolution: state.videoResolution,
-                    duration: state.videoDuration,
-                    mode: state.videoMode,
-                    referenceImage: state.mode === 'i2v' ? state.referenceImages[0] : null
-                });
+                addResultVideo(result.video.videoUrl, result.video.thumbnailUrl, prompt, duration);
             } else {
-                // 图片生成
-                result = await generateImage({
-                    prompt: task.prompt,
-                    model: state.model,
-                    resolution: state.resolution,
-                    aspectRatio: state.aspectRatio,
-                    referenceImages: state.mode === 'i2i' ? state.referenceImages : []
+                result.images.forEach(img => {
+                    addResultImage(img.url, prompt, duration);
                 });
             }
-
-            const duration = ((Date.now() - startTime) / 1000).toFixed(1);
-
-            const isSuccess = isVideoMode
-                ? Boolean(result && result.success && result.video && result.video.videoUrl)
-                : Boolean(result && result.success && Array.isArray(result.images) && result.images.length > 0);
-
-            completed++;
-            updateProgressCount(completed, tasks.length);
-            updateProgressItem(task.id, isSuccess ? 'completed' : 'error', duration);
-
-            if (isSuccess) {
-                if (isVideoMode) {
-                    addResultVideo(result.video.videoUrl, result.video.thumbnailUrl, task.prompt, duration);
-                } else {
-                    result.images.forEach(img => {
-                        addResultImage(img.url, task.prompt, duration);
-                    });
-                }
-            }
-
-            return result;
-        } catch (error) {
-            const duration = ((Date.now() - startTime) / 1000).toFixed(1);
-            completed++;
-            updateProgressCount(completed, tasks.length);
-            updateProgressItem(task.id, 'error', duration);
-            console.error('生成失败:', error);
-            return { success: false, error: error.message };
+            
+            // 任务成功后，延迟移除进度条，保持界面整洁
+            setTimeout(() => {
+                removeProgressItem(taskId);
+            }, 5000);
         }
-    };
 
-    const promises = tasks.map((task, index) => executeTask(task, index));
-    const results = await Promise.all(promises);
-
-    const successCount = results.filter(r => r.success).length;
-    const failCount = results.filter(r => !r.success).length;
-
-    if (successCount > 0) {
-        showToast(`成功生成 ${successCount} ${isVideoMode ? '个视频' : '张图片'}`, 'success');
+    } catch (error) {
+        const duration = ((Date.now() - startTime) / 1000).toFixed(1);
+        updateProgressItem(taskId, 'error', duration);
+        console.error(`任务 ${taskId} 失败:`, error);
     }
-    if (failCount > 0) {
-        showToast(`${failCount} 个任务失败`, 'error');
+}
+
+function addProgressItem(taskId, name) {
+    const item = document.createElement('div');
+    item.className = 'progress-item';
+    item.id = `progress-${taskId}`;
+    item.innerHTML = `
+        <div class="progress-spinner"></div>
+        <span>${name} - 生成中...</span>
+    `;
+    // 插入到最前面
+    if (elements.progressList.firstChild) {
+        elements.progressList.insertBefore(item, elements.progressList.firstChild);
+    } else {
+        elements.progressList.appendChild(item);
     }
+}
 
-    loadHistory();
+function removeProgressItem(taskId) {
+    const item = document.getElementById(`progress-${taskId}`);
+    if (item) {
+        item.style.opacity = '0';
+        item.style.transform = 'translateX(20px)';
+        setTimeout(() => item.remove(), 300);
+    }
+}
 
-    setTimeout(() => {
-        elements.progressSection.classList.add('hidden');
-    }, 2000);
-
-    // 启用按钮
-    elements.generateBtn.disabled = false;
+function clearCompletedProgress() {
+    const items = elements.progressList.querySelectorAll('.progress-item.completed, .progress-item.error');
+    items.forEach(item => {
+        item.style.opacity = '0';
+        setTimeout(() => item.remove(), 300);
+    });
 }
 
 async function generateImage(params) {
+    if (!state.token) {
+        openAuthModal();
+        throw new Error('请先登录');
+    }
+
     // Web UI 采用“提交任务 + 轮询结果”，避免长连接被浏览器/反代超时
     const submitResponse = await fetch('/api/generate/submit', {
         method: 'POST',
         headers: {
-            'Content-Type': 'application/json'
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${state.token}`
         },
         body: JSON.stringify(params)
     });
+
+    if (submitResponse.status === 401) {
+        let message = '登录已失效，请重新登录';
+        try {
+            const data = await submitResponse.json();
+            if (data && typeof data.error === 'string' && data.error.trim()) message = data.error.trim();
+        } catch {
+            // ignore
+        }
+        forceLogoutAndReauth(message);
+        throw new Error(message);
+    }
 
     const submitContentType = submitResponse.headers.get('content-type') || '';
     if (!submitContentType.includes('application/json')) {
@@ -576,7 +976,10 @@ async function generateImage(params) {
     while (Date.now() - startPollAt < maxWaitMs) {
         const statusResponse = await fetch(`/api/generate/status/${encodeURIComponent(jobId)}?t=${Date.now()}`, {
             method: 'GET',
-            headers: { 'Accept': 'application/json' }
+            headers: {
+                'Accept': 'application/json',
+                'Authorization': `Bearer ${state.token}`
+            }
         });
 
         const contentType = statusResponse.headers.get('content-type') || '';
@@ -615,14 +1018,32 @@ async function generateImage(params) {
  * 视频生成请求 (使用异步任务 + 轮询)
  */
 async function generateVideoRequest(params) {
+    if (!state.token) {
+        openAuthModal();
+        throw new Error('请先登录');
+    }
+
     // 提交视频生成任务
     const submitResponse = await fetch('/api/generate/video/submit', {
         method: 'POST',
         headers: {
-            'Content-Type': 'application/json'
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${state.token}`
         },
         body: JSON.stringify(params)
     });
+
+    if (submitResponse.status === 401) {
+        let message = '登录已失效，请重新登录';
+        try {
+            const data = await submitResponse.json();
+            if (data && typeof data.error === 'string' && data.error.trim()) message = data.error.trim();
+        } catch {
+            // ignore
+        }
+        forceLogoutAndReauth(message);
+        throw new Error(message);
+    }
 
     const submitContentType = submitResponse.headers.get('content-type') || '';
     if (!submitContentType.includes('application/json')) {
@@ -646,7 +1067,10 @@ async function generateVideoRequest(params) {
     while (Date.now() - startPollAt < maxWaitMs) {
         const statusResponse = await fetch(`/api/generate/status/${encodeURIComponent(jobId)}?t=${Date.now()}`, {
             method: 'GET',
-            headers: { 'Accept': 'application/json' }
+            headers: {
+                'Accept': 'application/json',
+                'Authorization': `Bearer ${state.token}`
+            }
         });
 
         const contentType = statusResponse.headers.get('content-type') || '';
@@ -678,34 +1102,28 @@ async function generateVideoRequest(params) {
     throw new Error('视频生成超时（前端轮询超时）');
 }
 
-function updateProgressCount(completed, total) {
-    elements.progressCount.textContent = `${completed}/${total}`;
-}
+// updateProgressCount 已废弃
 
 function updateProgressItem(taskId, status, duration = null) {
     const item = document.getElementById(`progress-${taskId}`);
     if (item) {
-        item.classList.remove('progress-item');
-        item.classList.add('progress-item', status);
-
+        // 移除原有 spinner
+        item.classList.add(status);
+        
+        const name = item.querySelector('span').textContent.split('(')[0].trim();
         const durationText = duration ? ` (${duration}s)` : '';
-
+        
+        let iconSvg = '';
         if (status === 'completed') {
-            item.innerHTML = `
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
-                    <polyline points="20 6 9 17 4 12"/>
-                </svg>
-                <span>完成${durationText}</span>
-            `;
+            iconSvg = `<svg class="text-success" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><polyline points="20 6 9 17 4 12"/></svg>`;
         } else if (status === 'error') {
-            item.innerHTML = `
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
-                    <line x1="18" y1="6" x2="6" y2="18"/>
-                    <line x1="6" y1="6" x2="18" y2="18"/>
-                </svg>
-                <span>失败${durationText}</span>
-            `;
+            iconSvg = `<svg class="text-error" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>`;
         }
+
+        item.innerHTML = `
+            ${iconSvg}
+            <span>${name}${durationText}</span>
+        `;
     }
 }
 
@@ -798,8 +1216,14 @@ function createImageCard(url, prompt, meta = {}) {
 // ==================== 历史记录 ====================
 
 async function loadHistory() {
+    if (!state.token) return;
+
     try {
-        const response = await fetch('/api/history?limit=50');
+        const response = await fetch('/api/history?limit=50', {
+            headers: {
+                'Authorization': `Bearer ${state.token}`
+            }
+        });
         const data = await response.json();
 
         if (data.success) {
@@ -814,13 +1238,6 @@ async function loadHistory() {
 function renderHistory() {
     elements.historyGrid.innerHTML = '';
     elements.historyCount.textContent = `${state.history.length} 张`;
-
-    if (state.history.length === 0) {
-        elements.historySection.classList.add('hidden');
-        return;
-    }
-
-    elements.historySection.classList.remove('hidden');
 
     state.history.forEach(item => {
         // 视频记录
@@ -847,7 +1264,12 @@ async function clearHistory() {
     }
 
     try {
-        await fetch('/api/history', { method: 'DELETE' });
+        await fetch('/api/history', {
+            method: 'DELETE',
+            headers: {
+                'Authorization': `Bearer ${state.token}`
+            }
+        });
         state.history = [];
         renderHistory();
         showToast('历史记录已清空', 'success');

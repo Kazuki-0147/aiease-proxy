@@ -1,15 +1,23 @@
 /**
  * AI EASE to OpenAI-Compatible API Proxy
- * 
+ *
  * 将 AI EASE 图像生成服务封装为 OpenAI 兼容的 API
  * 支持 /v1/images/generations 端点
  * 包含 Web 前端界面
  */
 
+require('dotenv').config(); // 必须在最前面加载
 const express = require('express');
 const fetch = require('node-fetch');
 const path = require('path');
 const fs = require('fs');
+const jwt = require('jsonwebtoken');
+const bcrypt = require('bcryptjs');
+const { sequelize, testConnection } = require('./src/config/database');
+const { JWT_SECRET } = require('./src/config/jwt');
+const User = require('./src/models/User');
+const History = require('./src/models/History');
+const auth = require('./src/middleware/auth');
 
 const app = express();
 app.use(express.json({ limit: '50mb' }));
@@ -31,14 +39,10 @@ app.use((req, res, next) => {
 
 // ==================== 配置 ====================
 
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 3001;
 const AIEASE_API_BASE = 'https://www.aiease.ai/api/api';
 const POLL_INTERVAL = 3000; // 轮询间隔 3 秒
 const MAX_POLL_TIME = 180000; // 最大等待时间 3 分钟
-
-// 历史记录存储 (内存)
-const generationHistory = [];
-const MAX_HISTORY = 100;
 
 // Web UI 异步任务（内存）
 const generationJobs = new Map(); // jobId -> { status, createdAt, updatedAt, result, error, ... }
@@ -146,43 +150,60 @@ function generateId() {
 }
 
 /**
- * 获取带伪造 IP 的请求头
+ * 获取请求头
+ * @param {string|null} token - Bearer token
+ * @param {object} options - 可选参数
+ * @param {string|null} options.cookies - 要回传的 cookies
  */
-function getHeaders(token = null, fakeIPOverride = null) {
-    const fakeIP = fakeIPOverride || generateRandomIPv6();
+function getHeaders(token = null, options = {}) {
+    const { cookies = null } = options;
+
+    // 生成随机 IPv6 用于避免 IP 审查
+    const fakeIPv6 = generateRandomIPv6();
+
     const headers = {
         'Content-Type': 'application/json',
         'Accept': 'application/json',
         'Cache-Control': 'no-cache',
         'Pragma': 'no-cache',
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-        'X-Forwarded-For': fakeIP,
-        'X-Real-IP': fakeIP,
-        'CF-Connecting-IP': fakeIP,
-        'True-Client-IP': fakeIP,
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         'Origin': 'https://www.aiease.ai',
-        'Referer': 'https://www.aiease.ai/model/nano-banana-2/'
+        'Referer': 'https://www.aiease.ai/model/nano-banana-2/',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'sec-ch-ua': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
+        'sec-ch-ua-mobile': '?0',
+        'sec-ch-ua-platform': '"Windows"',
+        'Sec-Fetch-Dest': 'empty',
+        'Sec-Fetch-Mode': 'cors',
+        'Sec-Fetch-Site': 'same-origin',
+        'X-Forwarded-For': fakeIPv6,
+        'X-Real-IP': fakeIPv6
     };
 
+    // 添加 Token
     if (token) {
         headers['Authorization'] = `Bearer ${token}`;
     }
 
-    return { headers, fakeIP };
+    // 添加 Cookies（关键！用于会话保持）
+    if (cookies) {
+        headers['Cookie'] = cookies;
+    }
+
+    return { headers };
 }
 
 /**
- * 获取匿名 Token
+ * 获取匿名 Token 和会话 Cookies
  */
 async function getAnonymousToken() {
-    const { headers, fakeIP } = getHeaders();
+    const { headers } = getHeaders();
 
-    console.log(`[Token] 使用伪造 IP: ${fakeIP}`);
     console.log(`[Token] 正在请求 Token...`);
 
     let response;
     try {
-        response = await fetch(`${AIEASE_API_BASE}/user/v2/visit`, {
+        response = await fetch(`${AIEASE_API_BASE}/user/visit`, {
             method: 'POST',
             headers,
             body: '{}'
@@ -230,12 +251,31 @@ async function getAnonymousToken() {
         throw new Error(`Token 响应不是有效 JSON: ${responseText.substring(0, 200)}`);
     }
 
-    if (data.code === 200 && data.result && data.result.token) {
-        console.log(`[Token] 获取成功: 用户ID ${data.result.id}`);
+    // 提取 Set-Cookie（关键！用于会话保持）
+    const setCookieHeader = response.headers.get('set-cookie');
+    let cookies = null;
+    if (setCookieHeader) {
+        // 可能有多个 Set-Cookie，需要合并
+        // node-fetch 返回的是用逗号分隔的字符串，需要提取 cookie 名=值 部分
+        cookies = setCookieHeader
+            .split(/,(?=[^;]+=[^;]+)/)  // 按逗号分割，但不分割 cookie 值中的逗号
+            .map(c => c.split(';')[0].trim())  // 只取 name=value 部分
+            .join('; ');
+        console.log(`[Token] 获取到 Cookies: ${cookies.substring(0, 100)}...`);
+    } else {
+        console.log(`[Token] 未获取到 Set-Cookie`);
+    }
+
+    // 兼容新旧两种 API 返回格式
+    // 旧格式: data.result.token / data.result.id
+    // 新格式: data.result.user.token / data.result.user.id
+    const tokenData = data.result?.user || data.result;
+    if (data.code === 200 && tokenData && tokenData.token) {
+        console.log(`[Token] 获取成功: 用户ID ${tokenData.id}`);
         return {
-            token: data.result.token,
-            userId: data.result.id,
-            fakeIP
+            token: tokenData.token,
+            userId: tokenData.id,
+            cookies  // 返回 cookies 用于后续请求
         };
     }
 
@@ -301,7 +341,7 @@ async function uploadImageToCDN(token, base64Image) {
  * 提交图片生成任务
  */
 async function submitImageGeneration(token, prompt, options = {}) {
-    const { headers, fakeIP } = getHeaders(token, options.fakeIP);
+    const { headers } = getHeaders(token, { cookies: options.cookies });
 
     const modelId = options.model || 'kie_nano_banana_pro';
     const modelConfig = getModelConfig(modelId);
@@ -375,7 +415,7 @@ async function submitImageGeneration(token, prompt, options = {}) {
         }
     };
 
-    console.log(`[Generate] 使用伪造 IP: ${fakeIP}`);
+    console.log(`[Generate] 使用 Cookies: ${options.cookies ? '是' : '否'}`);
     console.log(`[Generate] 模型: ${modelId} (genType: ${modelConfig.genType}, model: ${modelConfig.model})`);
     console.log(`[Generate] 提交任务: "${promptText.substring(0, 50)}..." (${genType})`);
     console.log(`[Generate] 请求体: ${JSON.stringify({ ...body, params: { ...body.params, content: body.params.content.map(c => c.type === 'image' ? { ...c, imgUrl: (c.imgUrl || '').substring(0, 80) + '...' } : c) } })}`);
@@ -399,13 +439,13 @@ async function submitImageGeneration(token, prompt, options = {}) {
 /**
  * 轮询获取生成结果
  */
-async function pollForResult(token, taskId, fakeIPOverride = null) {
-    const { headers, fakeIP } = getHeaders(token, fakeIPOverride);
+async function pollForResult(token, taskId, options = {}) {
+    const { headers } = getHeaders(token, { cookies: options.cookies });
     const startTime = Date.now();
     let lastResponse = null;
     let pollCount = 0;
 
-    console.log(`[Poll] 使用伪造 IP: ${fakeIP}`);
+    console.log(`[Poll] 使用 Cookies: ${options.cookies ? '是' : '否'}`);
     console.log(`[Poll] 开始轮询任务 ${taskId}...`);
 
     while (Date.now() - startTime < MAX_POLL_TIME) {
@@ -458,14 +498,14 @@ async function pollForResult(token, taskId, fakeIPOverride = null) {
  * 完整的图片生成流程
  */
 async function generateImage(prompt, options = {}) {
-    // 1. 获取匿名 Token
-    const { token, fakeIP } = await getAnonymousToken();
+    // 1. 获取匿名 Token 和 Cookies
+    const { token, cookies } = await getAnonymousToken();
 
-    // 2. 提交生成任务
-    const taskId = await submitImageGeneration(token, prompt, { ...options, fakeIP });
+    // 2. 提交生成任务（带 cookies）
+    const taskId = await submitImageGeneration(token, prompt, { ...options, cookies });
 
-    // 3. 轮询获取结果
-    const images = await pollForResult(token, taskId, fakeIP);
+    // 3. 轮询获取结果（带 cookies）
+    const images = await pollForResult(token, taskId, { cookies });
 
     return images;
 }
@@ -479,7 +519,7 @@ const VIDEO_MAX_POLL_TIME = 600000; // 视频最大等待时间 10 分钟
  * 提交视频生成任务
  */
 async function submitVideoGeneration(token, prompt, options = {}) {
-    const { headers, fakeIP } = getHeaders(token, options.fakeIP);
+    const { headers } = getHeaders(token, { cookies: options.cookies });
 
     const type = options.referenceImage ? 'i2v' : 't2v';
     const ratio = options.ratio || '16:9';
@@ -527,7 +567,7 @@ async function submitVideoGeneration(token, prompt, options = {}) {
         }
     };
 
-    console.log(`[Video] 使用伪造 IP: ${fakeIP}`);
+    console.log(`[Video] 使用 Cookies: ${options.cookies ? '是' : '否'}`);
     console.log(`[Video] 提交任务: "${prompt.substring(0, 50)}..." (${type})`);
     console.log(`[Video] 参数: ratio=${ratio}, resolution=${resolution}, duration=${duration}s, mode=${mode}`);
 
@@ -550,13 +590,13 @@ async function submitVideoGeneration(token, prompt, options = {}) {
 /**
  * 轮询获取视频生成结果
  */
-async function pollForVideoResult(token, taskId, fakeIPOverride = null) {
-    const { headers, fakeIP } = getHeaders(token, fakeIPOverride);
+async function pollForVideoResult(token, taskId, options = {}) {
+    const { headers } = getHeaders(token, { cookies: options.cookies });
     const startTime = Date.now();
     let lastResponse = null;
     let pollCount = 0;
 
-    console.log(`[Video Poll] 使用伪造 IP: ${fakeIP}`);
+    console.log(`[Video Poll] 使用 Cookies: ${options.cookies ? '是' : '否'}`);
     console.log(`[Video Poll] 开始轮询任务 ${taskId}...`);
 
     while (Date.now() - startTime < VIDEO_MAX_POLL_TIME) {
@@ -611,41 +651,117 @@ async function pollForVideoResult(token, taskId, fakeIPOverride = null) {
  * 完整的视频生成流程
  */
 async function generateVideo(prompt, options = {}) {
-    // 1. 获取匿名 Token
-    const { token, fakeIP } = await getAnonymousToken();
+    // 1. 获取匿名 Token 和 Cookies
+    const { token, cookies } = await getAnonymousToken();
 
-    // 2. 提交视频生成任务
-    const taskId = await submitVideoGeneration(token, prompt, { ...options, fakeIP });
+    // 2. 提交视频生成任务（带 cookies）
+    const taskId = await submitVideoGeneration(token, prompt, { ...options, cookies });
 
-    // 3. 轮询获取结果
-    const result = await pollForVideoResult(token, taskId, fakeIP);
+    // 3. 轮询获取结果（带 cookies）
+    const result = await pollForVideoResult(token, taskId, { cookies });
 
     return result;
 }
 
 /**
- * 添加到历史记录
+ * 添加到历史记录 (数据库)
  */
-function addToHistory(entry) {
-    generationHistory.unshift({
-        id: generateId(),
-        timestamp: Date.now(),
-        ...entry
-    });
-
-    // 限制历史记录数量
-    if (generationHistory.length > MAX_HISTORY) {
-        generationHistory.pop();
+async function addToHistory(userId, entry) {
+    try {
+        await History.create({
+            userId,
+            prompt: entry.prompt,
+            model: entry.model,
+            type: entry.type || 't2i',
+            params: {
+                resolution: entry.resolution,
+                aspectRatio: entry.aspectRatio,
+                ratio: entry.ratio,
+                duration: entry.duration,
+                mode: entry.mode
+            },
+            result: {
+                imageUrl: entry.imageUrl,
+                videoUrl: entry.videoUrl,
+                thumbnailUrl: entry.thumbnailUrl
+            },
+            status: 'completed'
+        });
+    } catch (error) {
+        console.error('保存历史记录失败:', error);
     }
 }
 
 // ==================== API 路由 ====================
 
 /**
+ * 用户注册
+ */
+app.post('/api/auth/register', async (req, res) => {
+    try {
+        const username = typeof req.body?.username === 'string' ? req.body.username.trim() : '';
+        const password = typeof req.body?.password === 'string' ? req.body.password.trim() : '';
+        if (!username || !password) {
+            return res.status(400).json({ success: false, error: 'Username and password are required' });
+        }
+        if (password.length < 6) {
+            return res.status(400).json({ success: false, error: 'Password must be at least 6 characters' });
+        }
+
+        const existingUser = await User.findOne({ where: { username } });
+        if (existingUser) {
+            return res.status(400).json({ success: false, error: 'Username already exists' });
+        }
+
+        const user = await User.create({ username, password });
+        const token = jwt.sign({ id: user.id, username: user.username }, JWT_SECRET, { expiresIn: '7d' });
+
+        res.json({ success: true, token, user: { id: user.id, username: user.username } });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+/**
+ * 用户登录
+ */
+app.post('/api/auth/login', async (req, res) => {
+    try {
+        const username = typeof req.body?.username === 'string' ? req.body.username.trim() : '';
+        const password = typeof req.body?.password === 'string' ? req.body.password.trim() : '';
+        if (!username || !password) {
+            return res.status(400).json({ success: false, error: 'Username and password are required' });
+        }
+        const user = await User.findOne({ where: { username } });
+
+        if (!user || !(await user.validatePassword(password))) {
+            return res.status(401).json({ success: false, error: 'Invalid username or password' });
+        }
+
+        const token = jwt.sign({ id: user.id, username: user.username }, JWT_SECRET, { expiresIn: '7d' });
+        res.json({ success: true, token, user: { id: user.id, username: user.username } });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+/**
+ * 获取当前用户信息
+ */
+app.get('/api/auth/me', auth, async (req, res) => {
+    try {
+        const user = await User.findByPk(req.user.id, { attributes: ['id', 'username', 'createdAt'] });
+        res.json({ success: true, user });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+/**
  * 前端生成图片接口
  * POST /api/generate
  */
-app.post('/api/generate', async (req, res) => {
+app.post('/api/generate', auth, async (req, res) => {
     try {
         const {
             prompt,
@@ -688,8 +804,8 @@ app.post('/api/generate', async (req, res) => {
         });
 
         // 添加到历史记录
-        images.forEach(img => {
-            addToHistory({
+        for (const img of images) {
+            await addToHistory(req.user.id, {
                 prompt,
                 model,
                 resolution,
@@ -697,7 +813,7 @@ app.post('/api/generate', async (req, res) => {
                 type: genType,
                 imageUrl: img.url
             });
-        });
+        }
 
         res.json({
             success: true,
@@ -719,7 +835,7 @@ app.post('/api/generate', async (req, res) => {
  * Web UI：提交异步生成任务（避免长连接被反代超时）
  * POST /api/generate/submit
  */
-app.post('/api/generate/submit', async (req, res) => {
+app.post('/api/generate/submit', auth, async (req, res) => {
     const {
         prompt,
         model = 'kie_nano_banana_pro',
@@ -741,8 +857,10 @@ app.post('/api/generate/submit', async (req, res) => {
     const mappedModel = mapModel(model);
 
     const jobId = generateId();
+    // 存储 userId 以便在异步任务完成后关联历史记录
     generationJobs.set(jobId, {
         id: jobId,
+        userId: req.user.id,
         status: 'queued',
         createdAt: Date.now(),
         updatedAt: Date.now(),
@@ -776,8 +894,8 @@ app.post('/api/generate/submit', async (req, res) => {
             });
 
             // 写历史
-            images.forEach(img => {
-                addToHistory({
+            for (const img of images) {
+                await addToHistory(job.userId, {
                     prompt,
                     model,
                     resolution,
@@ -785,7 +903,7 @@ app.post('/api/generate/submit', async (req, res) => {
                     type: genType,
                     imageUrl: img.url
                 });
-            });
+            }
 
             job.status = 'completed';
             job.updatedAt = Date.now();
@@ -832,7 +950,7 @@ app.get('/api/generate/status/:jobId', (req, res) => {
  * 前端视频生成接口（同步，等待结果）
  * POST /api/generate/video
  */
-app.post('/api/generate/video', async (req, res) => {
+app.post('/api/generate/video', auth, async (req, res) => {
     try {
         const {
             prompt,
@@ -865,7 +983,7 @@ app.post('/api/generate/video', async (req, res) => {
         });
 
         // 添加到历史记录
-        addToHistory({
+        await addToHistory(req.user.id, {
             prompt,
             type,
             ratio,
@@ -894,7 +1012,7 @@ app.post('/api/generate/video', async (req, res) => {
  * 前端视频生成接口（异步，提交后轮询）
  * POST /api/generate/video/submit
  */
-app.post('/api/generate/video/submit', async (req, res) => {
+app.post('/api/generate/video/submit', auth, async (req, res) => {
     const {
         prompt,
         ratio = '16:9',
@@ -913,6 +1031,7 @@ app.post('/api/generate/video/submit', async (req, res) => {
     const jobId = generateId();
     generationJobs.set(jobId, {
         id: jobId,
+        userId: req.user.id,
         status: 'queued',
         createdAt: Date.now(),
         updatedAt: Date.now(),
@@ -948,7 +1067,7 @@ app.post('/api/generate/video/submit', async (req, res) => {
             });
 
             // 添加到历史记录
-            addToHistory({
+            await addToHistory(job.userId, {
                 prompt,
                 type,
                 ratio,
@@ -976,21 +1095,68 @@ app.post('/api/generate/video/submit', async (req, res) => {
  * 获取历史记录
  * GET /api/history
  */
-app.get('/api/history', (req, res) => {
-    const limit = parseInt(req.query.limit) || 50;
-    res.json({
-        success: true,
-        history: generationHistory.slice(0, limit)
-    });
+app.get('/api/history', auth, async (req, res) => {
+    try {
+        const limit = parseInt(req.query.limit) || 50;
+        const history = await History.findAll({
+            where: { userId: req.user.id },
+            order: [['createdAt', 'DESC']],
+            limit: limit
+        });
+
+        // 格式化返回结构以匹配前端预期
+        const formattedHistory = history.map(h => {
+            const result = h.result || {};
+            const params = h.params || {};
+            
+            // 基础字段
+            const item = {
+                id: h.id,
+                prompt: h.prompt,
+                model: h.model,
+                type: h.type,
+                timestamp: new Date(h.createdAt).getTime(),
+                // 参数
+                resolution: params.resolution,
+                aspectRatio: params.aspectRatio,
+                ratio: params.ratio,
+                duration: params.duration,
+                mode: params.mode
+            };
+
+            // 结果字段
+            if (h.type === 't2v' || h.type === 'i2v') {
+                item.videoUrl = result.videoUrl;
+                item.thumbnailUrl = result.thumbnailUrl;
+            } else {
+                item.imageUrl = result.imageUrl;
+            }
+
+            return item;
+        });
+
+        res.json({
+            success: true,
+            history: formattedHistory
+        });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
 });
 
 /**
  * 清空历史记录
  * DELETE /api/history
  */
-app.delete('/api/history', (req, res) => {
-    generationHistory.length = 0;
-    res.json({ success: true });
+app.delete('/api/history', auth, async (req, res) => {
+    try {
+        await History.destroy({
+            where: { userId: req.user.id }
+        });
+        res.json({ success: true });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
 });
 
 /**
@@ -1351,8 +1517,10 @@ app.get('/health', (req, res) => {
 
 const HOST = process.env.HOST || '0.0.0.0';
 
-app.listen(PORT, HOST, () => {
-    console.log(`
+// 初始化数据库并启动服务器
+testConnection().then(() => {
+    app.listen(PORT, HOST, () => {
+        console.log(`
 ╔═══════════════════════════════════════════════════════════╗
 ║           AI EASE Proxy - Image Generation UI             ║
 ╠═══════════════════════════════════════════════════════════╣
@@ -1362,11 +1530,17 @@ app.listen(PORT, HOST, () => {
 ║    http://localhost:${PORT}                  - 图像生成界面    ║
 ║                                                           ║
 ║  API Endpoints:                                           ║
-║    POST /api/generate           - 前端生成接口            ║
-║    GET  /api/history            - 历史记录                ║
+║    POST /api/generate           - 前端生成接口 (Auth)     ║
+║    GET  /api/history            - 历史记录 (Auth)         ║
+║    POST /api/auth/register      - 用户注册                ║
+║    POST /api/auth/login         - 用户登录                ║
 ║    POST /v1/images/generations  - OpenAI 兼容接口         ║
 ║    GET  /v1/models              - 模型列表                ║
 ║    GET  /health                 - 健康检查                ║
 ╚═══════════════════════════════════════════════════════════╝
-    `);
+        `);
+    });
+}).catch(err => {
+    console.error('Failed to connect to database:', err);
+    process.exit(1);
 });

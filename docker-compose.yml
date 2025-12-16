@@ -1,0 +1,27 @@
+version: '3.8'
+
+services:
+  app:
+    build: .
+    container_name: aiease-proxy
+    restart: always
+    ports:
+      - "3001:3001"
+    environment:
+      - PORT=3001
+      - NODE_ENV=production
+      - DB_TYPE=mysql
+      - DB_HOST=1Panel-mysql-pNqG
+      - DB_PORT=3306
+      - DB_NAME=aiease
+      - DB_USER=aiease
+      - DB_PASSWORD=5xePJzthmNZbSN8B
+      - JWT_SECRET=aiease-proxy-jwt-secret-2024-secure-key
+      - MAX_CONCURRENT_UPSTREAM=10
+    networks:
+      - 1panel-network
+
+# 使用 1Panel 已有的网络，连接到现有 MySQL 容器
+networks:
+  1panel-network:
+    external: true

@@ -13,6 +13,13 @@
 </head>
 
 <body>
+    <!-- 动态背景层 -->
+    <div class="app-background">
+        <div class="glow-orb orb-1"></div>
+        <div class="glow-orb orb-2"></div>
+        <div class="grid-overlay"></div>
+    </div>
+
     <div class="app-container">
         <!-- 侧边栏 -->
         <aside class="sidebar">
@@ -36,45 +43,76 @@
                 </button>
             </div>
 
-            <!-- 模式切换 -->
-            <div class="mode-switch">
-                <button class="mode-btn active" data-mode="t2i">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                        <polyline points="14,2 14,8 20,8" />
-                        <line x1="16" y1="13" x2="8" y2="13" />
-                        <line x1="16" y1="17" x2="8" y2="17" />
-                    </svg>
-                    文生图
+            <!-- 可滚动的内容区域 -->
+            <div class="sidebar-scrollable">
+                <!-- 主导航 -->
+                <nav class="main-nav">
+                    <button class="nav-btn active" data-view="create">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M12 19l7-7 3 3-7 7-3-3z"></path>
+                            <path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z"></path>
+                            <path d="M2 2l7.586 7.586"></path>
+                            <circle cx="11" cy="11" r="2"></circle>
+                        </svg>
+                        创作中心
+                    </button>
+                    <button class="nav-btn" data-view="gallery">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                            <circle cx="8.5" cy="8.5" r="1.5"></circle>
+                            <polyline points="21 15 16 10 5 21"></polyline>
+                        </svg>
+                        我的图库
+                    </button>
+                </nav>
+
+                <!-- 模式切换 (仅在创作视图显示) -->
+                <div class="mode-switch" id="mode-switch-container">
+                <button class="mode-btn active" data-mode="t2i" title="文本生成图片">
+                    <div class="mode-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                            <polyline points="14,2 14,8 20,8" />
+                            <line x1="16" y1="13" x2="8" y2="13" />
+                            <line x1="16" y1="17" x2="8" y2="17" />
+                        </svg>
+                    </div>
+                    <span class="mode-label">文生图</span>
                 </button>
-                <button class="mode-btn" data-mode="i2i">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
-                        <circle cx="8.5" cy="8.5" r="1.5" />
-                        <polyline points="21 15 16 10 5 21" />
-                    </svg>
-                    图生图
+                <button class="mode-btn" data-mode="i2i" title="图片生成图片">
+                    <div class="mode-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+                            <circle cx="8.5" cy="8.5" r="1.5" />
+                            <polyline points="21 15 16 10 5 21" />
+                        </svg>
+                    </div>
+                    <span class="mode-label">图生图</span>
                 </button>
-                <button class="mode-btn" data-mode="t2v">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <polygon points="5 3 19 12 5 21 5 3" />
-                    </svg>
-                    文生视频
+                <button class="mode-btn" data-mode="t2v" title="文本生成视频">
+                    <div class="mode-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <polygon points="5 3 19 12 5 21 5 3" />
+                        </svg>
+                    </div>
+                    <span class="mode-label">文生视频</span>
                 </button>
-                <button class="mode-btn" data-mode="i2v">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18" />
-                        <line x1="7" y1="2" x2="7" y2="22" />
-                        <line x1="17" y1="2" x2="17" y2="22" />
-                        <line x1="2" y1="12" x2="22" y2="12" />
-                        <polygon points="10 8 14 12 10 16 10 8" />
-                    </svg>
-                    图生视频
+                <button class="mode-btn" data-mode="i2v" title="图片生成视频">
+                    <div class="mode-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18" />
+                            <line x1="7" y1="2" x2="7" y2="22" />
+                            <line x1="17" y1="2" x2="17" y2="22" />
+                            <line x1="2" y1="12" x2="22" y2="12" />
+                            <polygon points="10 8 14 12 10 16 10 8" />
+                        </svg>
+                    </div>
+                    <span class="mode-label">图生视频</span>
                 </button>
             </div>
 
-            <!-- 参数面板 -->
-            <div class="params-panel">
+                <!-- 参数面板 (仅在创作视图显示) -->
+                <div class="params-panel" id="params-panel-container">
                 <h3 class="panel-title">生成参数</h3>
 
                 <!-- 图像模型 (默认显示) -->
@@ -154,7 +192,8 @@
                     </div>
                 </div>
 
-                <div class="param-group">
+                <!-- 并发数量设置 -->
+                <div class="param-group" id="concurrent-group">
                     <label class="param-label">
                         并发数量
                         <span class="param-value" id="concurrent-value">1</span>
@@ -199,101 +238,155 @@
                             <button class="param-btn" data-video-ratio="9:16">9:16</button>
                         </div>
                     </div>
+                    </div>
                 </div>
             </div>
 
-            <!-- 快捷操作 -->
-            <div class="quick-actions">
-                <button class="action-btn" id="clear-history-btn">
+            <!-- 用户信息 & 快捷操作 -->
+            <div class="sidebar-footer">
+                <div class="user-profile hidden" id="user-profile">
+                    <div class="user-info">
+                        <div class="user-avatar">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+                                <circle cx="12" cy="7" r="4"></circle>
+                            </svg>
+                        </div>
+                        <span class="user-name" id="user-name-display">Guest</span>
+                    </div>
+                    <button class="icon-btn" id="logout-btn" title="退出登录">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
+                            <polyline points="16 17 21 12 16 7"></polyline>
+                            <line x1="21" y1="12" x2="9" y2="12"></line>
+                        </svg>
+                    </button>
+                </div>
+                
+                <button class="login-trigger-btn" id="login-trigger-btn">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <polyline points="3 6 5 6 21 6" />
-                        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                        <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"></path>
+                        <polyline points="10 17 15 12 10 7"></polyline>
+                        <line x1="15" y1="12" x2="3" y2="12"></line>
                     </svg>
-                    清空历史
+                    登录 / 注册
                 </button>
+
+                <div class="quick-actions">
+                    <button class="action-btn" id="clear-history-btn">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <polyline points="3 6 5 6 21 6" />
+                            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                        </svg>
+                        清空历史
+                    </button>
+                </div>
             </div>
         </aside>
         <div class="sidebar-backdrop hidden" id="sidebar-backdrop"></div>
 
         <!-- 主内容区 -->
         <main class="main-content">
-            <!-- 输入区域 -->
-            <div class="input-section">
-                <div class="mobile-toolbar">
-                    <button class="mobile-menu-btn" id="mobile-menu-btn" type="button" aria-label="打开参数面板">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <line x1="4" y1="6" x2="20" y2="6" />
-                            <line x1="4" y1="12" x2="20" y2="12" />
-                            <line x1="4" y1="18" x2="20" y2="18" />
-                        </svg>
-                        参数
-                    </button>
-                </div>
-                <!-- 图生图上传区域 -->
-                <div class="upload-area hidden" id="upload-area">
-                    <div class="upload-header">
-                        <span class="upload-title">参考图片</span>
-                        <span class="upload-count" id="upload-count">0/5 张</span>
-                    </div>
-                    <div class="upload-grid" id="upload-grid">
-                        <!-- 图片预览会动态添加到这里 -->
-                        <div class="upload-add-btn" id="upload-add-btn">
+            <!-- 创作视图容器 -->
+            <div id="view-create" class="view-container active">
+                <!-- 输入区域 -->
+                <div class="input-section">
+                    <div class="mobile-toolbar">
+                        <button class="mobile-menu-btn" id="mobile-menu-btn" type="button" aria-label="打开参数面板">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <line x1="12" y1="5" x2="12" y2="19" />
-                                <line x1="5" y1="12" x2="19" y2="12" />
+                                <line x1="4" y1="6" x2="20" y2="6" />
+                                <line x1="4" y1="12" x2="20" y2="12" />
+                                <line x1="4" y1="18" x2="20" y2="18" />
                             </svg>
-                            <span>添加图片</span>
+                        </button>
+                    </div>
+                    <!-- 图生图上传区域 -->
+                    <div class="upload-area hidden" id="upload-area">
+                        <div class="upload-header">
+                            <span class="upload-title">参考图片</span>
+                            <span class="upload-count" id="upload-count">0/5</span>
+                        </div>
+                        <div class="upload-grid" id="upload-grid">
+                            <!-- 图片预览会动态添加到这里 -->
+                            <div class="upload-add-btn" id="upload-add-btn">
+                                <div class="add-icon">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                        <line x1="12" y1="5" x2="12" y2="19" />
+                                        <line x1="5" y1="12" x2="19" y2="12" />
+                                    </svg>
+                                </div>
+                                <span>上传图片</span>
+                            </div>
+                        </div>
+                        <input type="file" id="file-input" accept="image/*" multiple hidden>
+                    </div>
+
+                    <!-- 提示词输入 -->
+                    <div class="prompt-wrapper">
+                        <div class="prompt-container">
+                            <textarea id="prompt-input" class="prompt-input" placeholder="发挥你的想象力..." rows="3"></textarea>
+                        </div>
+                        <div class="prompt-actions">
+                             <button class="generate-btn" id="generate-btn">
+                                <span class="btn-content">
+                                    <span class="btn-text">立即生成</span>
+                                    <span class="btn-icon">
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                            <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
+                                        </svg>
+                                    </span>
+                                </span>
+                                <div class="btn-glow"></div>
+                            </button>
                         </div>
                     </div>
-                    <p class="upload-hint">支持 JPG、PNG、WebP，最多 5 张</p>
-                    <input type="file" id="file-input" accept="image/*" multiple hidden>
                 </div>
 
-                <!-- 提示词输入 -->
-                <div class="prompt-container">
-                    <textarea id="prompt-input" class="prompt-input" placeholder="描述你想要生成的图像..." rows="3"></textarea>
-                    <button class="generate-btn" id="generate-btn">
-                        <span class="btn-text">生成</span>
-                        <span class="btn-icon">
+                <!-- 生成进度 -->
+                <div class="progress-section hidden" id="progress-section">
+                    <div class="progress-header">
+                        <h3>任务进程</h3>
+                        <button class="clear-progress-btn" id="clear-progress-btn" title="清除已完成任务">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
+                                <path d="M18 6L6 18M6 6l12 12"></path>
                             </svg>
-                        </span>
-                    </button>
+                        </button>
+                    </div>
+                    <div class="progress-list" id="progress-list"></div>
                 </div>
-            </div>
 
-            <!-- 生成进度 -->
-            <div class="progress-section hidden" id="progress-section">
-                <div class="progress-header">
-                    <h3>正在生成</h3>
-                    <span class="progress-count" id="progress-count">0/0</span>
-                </div>
-                <div class="progress-list" id="progress-list"></div>
-            </div>
-
-            <!-- 结果展示 -->
-            <div class="results-section" id="results-section">
-                <div class="section-header">
-                    <h2>生成结果</h2>
-                </div>
-                <div class="results-grid" id="results-grid">
-                    <div class="empty-state" id="empty-state">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                            <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
-                            <circle cx="8.5" cy="8.5" r="1.5" />
-                            <polyline points="21 15 16 10 5 21" />
-                        </svg>
-                        <p>输入提示词开始创作</p>
+                <!-- 结果展示 -->
+                <div class="results-section" id="results-section">
+                    <div class="section-header">
+                        <h2>本次生成</h2>
+                    </div>
+                    <div class="results-grid" id="results-grid">
+                        <div class="empty-state" id="empty-state">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                                <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+                                <circle cx="8.5" cy="8.5" r="1.5" />
+                                <polyline points="21 15 16 10 5 21" />
+                            </svg>
+                            <p>输入提示词开始创作</p>
+                        </div>
                     </div>
                 </div>
             </div>
 
-            <!-- 历史画廊 -->
-            <div class="history-section" id="history-section">
-                <div class="section-header">
-                    <h2>历史记录</h2>
-                    <span class="history-count" id="history-count">0 张</span>
+            <!-- 图库视图容器 -->
+            <div id="view-gallery" class="view-container">
+                <div class="gallery-header">
+                    <h2>我的图库</h2>
+                    <div class="gallery-actions">
+                        <span class="history-count" id="history-count">0 张</span>
+                        <button class="action-btn" id="refresh-gallery-btn" title="刷新">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M23 4v6h-6"></path>
+                                <path d="M1 20v-6h6"></path>
+                                <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
+                            </svg>
+                        </button>
+                    </div>
                 </div>
                 <div class="history-grid" id="history-grid"></div>
             </div>
@@ -328,6 +421,97 @@
                     </svg>
                 </button>
             </div>
+        </div>
+    </div>
+
+    <!-- 认证弹窗 -->
+    <div class="modal hidden" id="auth-modal" role="dialog" aria-modal="true" aria-labelledby="auth-title" aria-describedby="auth-subtitle">
+        <div class="modal-backdrop"></div>
+        <div class="modal-content auth-modal-content">
+            <div class="auth-header">
+                <h2 id="auth-title">欢迎回来</h2>
+                <p id="auth-subtitle">请登录以继续使用 AI EASE Studio</p>
+            </div>
+            
+            <div class="auth-tabs">
+                <button class="auth-tab active" data-tab="login">登录</button>
+                <button class="auth-tab" data-tab="register">注册</button>
+            </div>
+
+            <form id="auth-form" class="auth-form">
+                <div class="form-group">
+                    <label>用户名</label>
+                    <div class="input-wrapper">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+                            <circle cx="12" cy="7" r="4"></circle>
+                        </svg>
+                        <input type="text" id="username-input" placeholder="请输入用户名" required minlength="3" autocomplete="username">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>密码</label>
+                    <div class="input-wrapper">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+                            <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+                        </svg>
+                        <input type="password" id="password-input" placeholder="请输入密码" required minlength="6" autocomplete="current-password">
+                        <button type="button" class="toggle-password-btn" id="toggle-password-btn" tabindex="-1">
+                            <svg class="eye-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+                                <circle cx="12" cy="12" r="3"></circle>
+                            </svg>
+                            <svg class="eye-off-icon hidden" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path>
+                                <line x1="1" y1="1" x2="23" y2="23"></line>
+                            </svg>
+                        </button>
+                    </div>
+                </div>
+                <div class="form-group hidden" id="confirm-password-group">
+                    <label>确认密码</label>
+                    <div class="input-wrapper">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
+                            <polyline points="22 4 12 14.01 9 11.01"></polyline>
+                        </svg>
+                        <input type="password" id="confirm-password-input" placeholder="请再次输入密码" minlength="6" autocomplete="new-password">
+                    </div>
+                </div>
+                <button type="submit" class="auth-submit-btn">
+                    <span class="btn-text">登录</span>
+                    <div class="btn-loader hidden"></div>
+                </button>
+            </form>
+        </div>
+    </div>
+
+    <!-- 免责声明弹窗 -->
+    <div class="modal hidden" id="disclaimer-modal" data-prevent-close="true">
+        <div class="modal-backdrop"></div>
+        <div class="modal-content disclaimer-content">
+            <div class="disclaimer-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path>
+                    <line x1="12" y1="9" x2="12" y2="13"></line>
+                    <line x1="12" y1="17" x2="12.01" y2="17"></line>
+                </svg>
+            </div>
+            <h3>风险提示与免责声明</h3>
+            <div class="disclaimer-text">
+                <p>本项目基于开源项目二次开发，原项目地址：</p>
+                <div class="repo-link-wrapper">
+                    <a href="https://github.com/Kazuki-0147/aiease-proxy.git" target="_blank" class="repo-link">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"></path>
+                        </svg>
+                        <span>Kazuki-0147/aiease-proxy</span>
+                    </a>
+                </div>
+                <p>本项目仅供学习交流使用，不对使用者的任何行为负责。请遵守当地法律法规。</p>
+            </div>
+            <button id="accept-disclaimer-btn" class="auth-submit-btn">我已知晓并同意</button>
         </div>
     </div>
 
