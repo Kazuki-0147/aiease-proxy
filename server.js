@@ -35,7 +35,7 @@ app.use((req, res, next) => {
 const PORT = process.env.PORT || 3000;
 const AIEASE_API_BASE = 'https://www.aiease.ai/api/api';
 const POLL_INTERVAL = 3000; // 轮询间隔 3 秒
-const MAX_POLL_TIME = 180000; // 最大等待时间 3 分钟
+const MAX_POLL_TIME = 300000; // 最大等待时间 5 分钟
 
 // 历史记录存储 (内存)
 const generationHistory = [];
