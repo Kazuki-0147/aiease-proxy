@@ -6,11 +6,197 @@
  * 包含 Web 前端界面
  */
 
-require('dotenv').config(); // 必须在最前面加载
+const crypto = require('crypto');
 const express = require('express');
 const fetch = require('node-fetch');
 const path = require('path');
 const fs = require('fs');
+
+// 检测 .env 是否存在
+const ENV_PATH = path.join(__dirname, '.env');
+const isEnvConfigured = fs.existsSync(ENV_PATH);
+
+// 如果 .env 存在，加载它
+if (isEnvConfigured) {
+    require('dotenv').config();
+}
+
+const app = express();
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ limit: '50mb', extended: true }));
+
+// ==================== 初始化配置 API (无需 .env) ====================
+
+/**
+ * 检查配置状态
+ * GET /api/setup/status
+ */
+app.get('/api/setup/status', (req, res) => {
+    res.json({
+        configured: isEnvConfigured,
+        timestamp: new Date().toISOString()
+    });
+});
+
+/**
+ * 保存配置并创建 .env
+ * POST /api/setup
+ */
+app.post('/api/setup', (req, res) => {
+    // 如果已配置，禁止重复配置（安全考虑）
+    if (isEnvConfigured) {
+        return res.status(403).json({
+            success: false,
+            error: '系统已配置，如需重新配置请删除 .env 文件后重启服务'
+        });
+    }
+
+    try {
+        const {
+            multiUser = true,
+            dbType = 'sqlite',
+            port = 3001,
+            mysql = {}
+        } = req.body;
+
+        // 生成 JWT_SECRET
+        const jwtSecret = crypto.randomBytes(48).toString('hex');
+
+        // 构建 .env 内容
+        let envContent = `# AI EASE Proxy Configuration
+# Generated at ${new Date().toISOString()}
+
+# Server Configuration
+PORT=${port}
+HOST=0.0.0.0
+
+# Multi-user mode (true/false)
+MULTI_USER_MODE=${multiUser}
+
+# JWT Secret (auto-generated)
+JWT_SECRET=${jwtSecret}
+
+# Database Type: sqlite / mysql
+DB_TYPE=${dbType}
+`;
+
+        if (dbType === 'sqlite') {
+            envContent += `
+# SQLite Storage Path
+DB_STORAGE=./database.sqlite
+`;
+        } else if (dbType === 'mysql') {
+            const { host = 'localhost', port: dbPort = 3306, database = 'aiease_proxy', user = 'root', password = '' } = mysql;
+            envContent += `
+# MySQL Database Configuration
+DB_HOST=${host}
+DB_PORT=${dbPort}
+DB_NAME=${database}
+DB_USER=${user}
+DB_PASSWORD=${password}
+`;
+        }
+
+        envContent += `
+# Max concurrent upstream requests
+MAX_CONCURRENT_UPSTREAM=10
+`;
+
+        // 写入 .env 文件
+        fs.writeFileSync(ENV_PATH, envContent, 'utf8');
+
+        console.log('[Setup] .env 配置文件已创建');
+
+        // 检测是否在进程管理器下运行
+        const hasProcessManager = !!(
+            process.env.PM2_HOME ||           // PM2
+            process.env.DOCKER_CONTAINER ||   // Docker (自定义)
+            process.env.container ||          // Docker (systemd)
+            process.env.KUBERNETES_SERVICE_HOST // Kubernetes
+        );
+
+        if (hasProcessManager) {
+            console.log('[Setup] 检测到进程管理器，服务将在 3 秒后自动重启...');
+            res.json({
+                success: true,
+                message: '配置已保存，服务正在重启...',
+                autoRestart: true
+            });
+
+            // 延迟重启进程，让响应先返回
+            setTimeout(() => {
+                console.log('[Setup] 正在重启服务...');
+                process.exit(0); // 退出进程，由 PM2/Docker/systemd 自动重启
+            }, 3000);
+        } else {
+            // 本地开发环境，提示用户手动重启
+            console.log('[Setup] ================================');
+            console.log('[Setup] ✅ 配置保存成功！');
+            console.log('[Setup] ⚠️  请手动重启服务以应用配置：');
+            console.log('[Setup]    Ctrl+C 停止当前进程');
+            console.log('[Setup]    然后运行: npm start');
+            console.log('[Setup] ================================');
+            
+            res.json({
+                success: true,
+                message: '配置已保存！请手动重启服务 (Ctrl+C 后重新运行 npm start)',
+                autoRestart: false,
+                manualRestart: true
+            });
+        }
+
+    } catch (error) {
+        console.error('[Setup] 保存配置失败:', error);
+        res.status(500).json({
+            success: false,
+            error: error.message
+        });
+    }
+});
+
+// 如果未配置，只提供初始化页面
+if (!isEnvConfigured) {
+    // 静态文件服务（仅 setup 相关）
+    app.use('/js', express.static(path.join(__dirname, 'public/js')));
+    app.use('/css', express.static(path.join(__dirname, 'public/css')));
+
+    // 所有其他请求都重定向到初始化页面
+    app.get('*', (req, res) => {
+        // API 请求返回错误
+        if (req.path.startsWith('/api/') || req.path.startsWith('/v1/')) {
+            return res.status(503).json({
+                success: false,
+                error: '服务未配置，请先完成初始化设置',
+                setupUrl: '/setup.html'
+            });
+        }
+        // 其他请求重定向到 setup 页面
+        res.sendFile(path.join(__dirname, 'public/setup.html'));
+    });
+
+    // 启动最小化服务器
+    const SETUP_PORT = process.env.PORT || 3001;
+    app.listen(SETUP_PORT, '0.0.0.0', () => {
+        console.log(`
+╔═══════════════════════════════════════════════════════════╗
+║           AI EASE Proxy - 初始化配置                       ║
+╠═══════════════════════════════════════════════════════════╣
+║  ⚠️  检测到系统尚未配置                                    ║
+║                                                           ║
+║  请访问以下地址完成初始化:                                 ║
+║    http://localhost:${SETUP_PORT}/setup.html                       ║
+║                                                           ║
+║  配置完成后服务将自动重启                                  ║
+╚═══════════════════════════════════════════════════════════╝
+        `);
+    });
+
+    // 阻止后续代码执行
+    return;
+}
+
+// ==================== 以下代码仅在 .env 存在时执行 ====================
+
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 const { sequelize, testConnection } = require('./src/config/database');
@@ -18,10 +204,6 @@ const { JWT_SECRET } = require('./src/config/jwt');
 const User = require('./src/models/User');
 const History = require('./src/models/History');
 const auth = require('./src/middleware/auth');
-
-const app = express();
-app.use(express.json({ limit: '50mb' }));
-app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
 // 静态文件服务
 app.use(express.static(path.join(__dirname, 'public')));
