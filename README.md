@@ -29,7 +29,7 @@ cd aiease-proxy
 docker-compose up -d
 ```
 
-访问 `http://your-ip:3000` 即可使用。
+访问 `http://your-ip:3001` 即可使用。
 
 ### 2. 本地开发
 
@@ -49,7 +49,7 @@ npm run dev
 
 | 变量名 | 说明 | 默认值 |
 |--------|------|--------|
-| `PORT` | 服务端口 | `3000` |
+| `PORT` | 服务端口 | `3001` |
 | `JWT_SECRET` | JWT 签名密钥 (务必修改) | - |
 | `DB_TYPE` | 数据库类型 (`sqlite` / `mysql`) | `sqlite` |
 | `DB_HOST` | MySQL 主机 | `mysql` |
