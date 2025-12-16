@@ -198,8 +198,8 @@ if (!isEnvConfigured) {
 // ==================== 以下代码仅在 .env 存在时执行 ====================
 
 const jwt = require('jsonwebtoken');
-const bcrypt = require('bcryptjs');
-const { sequelize, testConnection } = require('./src/config/database');
+const rateLimit = require('express-rate-limit');
+const { testConnection } = require('./src/config/database');
 const { JWT_SECRET } = require('./src/config/jwt');
 const User = require('./src/models/User');
 const History = require('./src/models/History');
@@ -847,6 +847,9 @@ async function generateVideo(prompt, options = {}) {
 
 /**
  * 添加到历史记录 (数据库)
+ *
+ * 注意：历史记录被视为审计关键功能，失败时会记录详细日志
+ * 但不会阻塞主流程（生成任务仍然成功）
  */
 async function addToHistory(userId, entry) {
     try {
@@ -870,16 +873,64 @@ async function addToHistory(userId, entry) {
             status: 'completed'
         });
     } catch (error) {
-        console.error('保存历史记录失败:', error);
+        // 记录详细错误信息用于监控和排查
+        console.error('[History] ❌ 保存历史记录失败:', {
+            error: error.message,
+            stack: error.stack,
+            userId,
+            entryType: entry.type,
+            prompt: entry.prompt?.substring(0, 50)
+        });
+
+        // 在生产环境中，这里应该上报到监控系统（如 Sentry）
+        // 例如: Sentry.captureException(error, { extra: { userId, entry } });
+
+        // 不抛出错误，避免阻塞主流程
+        // 但会在日志中留下明确的失败记录
     }
 }
+
+// ==================== 限流中间件 ====================
+
+/**
+ * 登录限流：防止暴力破解
+ * - 每个 IP 每 15 分钟最多 5 次尝试
+ * - 超过限制后需等待 15 分钟
+ */
+const loginLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 分钟
+    max: 5, // 最多 5 次请求
+    message: {
+        success: false,
+        error: '登录尝试次数过多，请 15 分钟后再试'
+    },
+    standardHeaders: true, // 返回 RateLimit-* 头
+    legacyHeaders: false, // 禁用 X-RateLimit-* 头
+    // 生产环境建议使用 Redis store 以支持多实例
+    // store: new RedisStore({ client: redisClient })
+});
+
+/**
+ * 注册限流：防止批量注册和账户枚举
+ * - 每个 IP 每小时最多 3 次注册
+ */
+const registerLimiter = rateLimit({
+    windowMs: 60 * 60 * 1000, // 1 小时
+    max: 3, // 最多 3 次请求
+    message: {
+        success: false,
+        error: '注册请求过于频繁，请稍后再试'
+    },
+    standardHeaders: true,
+    legacyHeaders: false,
+});
 
 // ==================== API 路由 ====================
 
 /**
  * 用户注册
  */
-app.post('/api/auth/register', async (req, res) => {
+app.post('/api/auth/register', registerLimiter, async (req, res) => {
     try {
         const username = typeof req.body?.username === 'string' ? req.body.username.trim() : '';
         const password = typeof req.body?.password === 'string' ? req.body.password.trim() : '';
@@ -892,7 +943,8 @@ app.post('/api/auth/register', async (req, res) => {
 
         const existingUser = await User.findOne({ where: { username } });
         if (existingUser) {
-            return res.status(400).json({ success: false, error: 'Username already exists' });
+            // 统一错误响应，避免账户枚举
+            return res.status(400).json({ success: false, error: '注册失败，请检查输入信息' });
         }
 
         const user = await User.create({ username, password });
@@ -907,7 +959,7 @@ app.post('/api/auth/register', async (req, res) => {
 /**
  * 用户登录
  */
-app.post('/api/auth/login', async (req, res) => {
+app.post('/api/auth/login', loginLimiter, async (req, res) => {
     try {
         const username = typeof req.body?.username === 'string' ? req.body.username.trim() : '';
         const password = typeof req.body?.password === 'string' ? req.body.password.trim() : '';
@@ -917,7 +969,9 @@ app.post('/api/auth/login', async (req, res) => {
         const user = await User.findOne({ where: { username } });
 
         if (!user || !(await user.validatePassword(password))) {
-            return res.status(401).json({ success: false, error: 'Invalid username or password' });
+            // 统一错误响应，避免账户枚举
+            // 无论是用户名不存在还是密码错误，都返回相同的提示
+            return res.status(401).json({ success: false, error: '用户名或密码错误' });
         }
 
         const token = jwt.sign({ id: user.id, username: user.username }, JWT_SECRET, { expiresIn: '7d' });
